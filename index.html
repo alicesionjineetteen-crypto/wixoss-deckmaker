@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<title>WIXOSS Deck Builder</title>
+
+<!-- jQuery（必要なら） -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+<!-- カードデータ（あなたがアップした js/card_info.js を読み込む） -->
+<script src="js/card_info.js"></script>
+
+<!-- メインロジック -->
+<script src="main.js"></script>
+
+<link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+<div id="player-info">
+  ニックネーム：<span id="nickname"></span><br>
+  使用ルリグ：<span id="center-lrig"></span><br>
+  <button id="open-settings">設定を開く</button>
+</div>
+
+<!-- 設定モーダル -->
+<div id="settings-modal" class="modal">
+  <div class="modal-content">
+    <h3>設定</h3>
+
+    <label>ニックネーム</label>
+    <input id="nickname-input" type="text">
+
+    <label>使用ルリグ（カード名）</label>
+    <input id="lrig-input" type="text">
+
+    <button id="save-settings">保存</button>
+    <button id="close-settings">閉じる</button>
+  </div>
+</div>
+
+<!-- 検索エリア -->
+<div id="search-area">
+  <input id="search-box" type="text" placeholder="カード名 / No / テキスト検索">
+</div>
+
+<!-- 検索結果 -->
+<div id="card-list" class="card-grid"></div>
+
+<hr>
+
+<!-- デッキエリア -->
+<h2>◆ ルリグデッキ</h2>
+<div id="lrig-deck" class="deck-row scroll"></div>
+
+<h2>◆ メインデッキ（ライフバースト有）</h2>
+<div id="main-burst" class="deck-grid"></div>
+
+<h2>◆ メインデッキ（ライフバースト無）</h2>
+<div id="main-noburst" class="deck-grid"></div>
+
+<!-- 保存ボタン -->
+<button id="save-btn" class="fab">💾</button>
+
+<!-- 出力ボタン -->
+<button id="export-btn" class="export">📄</button>
+
+</body>
+</html>
