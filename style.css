@@ -1,0 +1,122 @@
+/* ===== 全体設定 ===== */
+body {
+  margin: 0;
+  padding: 10px;
+  background-color: #f8f9fa;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding-bottom: 100px;
+}
+
+/* ===== プレイヤー情報 ===== */
+#player-info {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  margin-bottom: 15px;
+}
+
+#player-info button {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 6px;
+}
+
+/* ===== 検索エリア ===== */
+#search-area {
+  padding: 10px;
+}
+
+#search-box {
+  width: 100%;
+  padding: 12px;
+  font-size: 18px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+
+/* ===== 検索結果（カード一覧） ===== */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 10px;
+}
+
+.card-img {
+  width: 100%;
+  border-radius: 8px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+}
+
+/* ===== デッキエリア ===== */
+.deck-row {
+  display: flex;
+  overflow-x: auto;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.deck-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+}
+
+/* ===== モーダル（設定画面） ===== */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+}
+
+.modal-content {
+  background: white;
+  margin: 20% auto;
+  padding: 20px;
+  width: 80%;
+  border-radius: 10px;
+}
+
+.modal-content input {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  margin-bottom: 15px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+/* ===== 保存ボタン（右下） ===== */
+.fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  background: #2196f3;
+  color: white;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  font-size: 24px;
+  border: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+/* ===== 出力ボタン（右上） ===== */
+.export {
+  position: fixed;
+  right: 20px;
+  top: 20px;
+  background: #4caf50;
+  color: white;
+  padding: 10px 15px;
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
