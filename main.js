@@ -1,13 +1,32 @@
 // =========================
 // カードデータ読み込み
 // =========================
-// card_info.js を読み込むと card_info が使える
-let allCards = card_info;
 
-// デッキデータ
-let lrigDeck = [];
-let mainBurst = [];
-let mainNoBurst = [];
+// cardData をオブジェクト形式に変換
+function convertCard(raw) {
+  return {
+    id: raw[0],
+    image: raw[1],
+    name: raw[2],
+    rare: raw[3],
+    type: raw[4],
+    class: raw[5],
+    color: raw[6],
+    level: raw[7],
+    cost: raw[8],
+    limit: raw[9],
+    power: raw[10],
+    coin: raw[11],
+    timing: raw[12],
+    burst: raw[13] !== "",   // LB が空でなければライフバースト
+    team: raw[14],
+    story: raw[15],
+    text: raw[16],           // 日本語テキスト
+    ban: raw[18]
+  };
+}
+
+let allCards = cardData.map(convertCard);
 
 // =========================
 // プレイヤー情報読み込み
@@ -73,7 +92,7 @@ document.getElementById("search-box").oninput = (e) => {
   const q = e.target.value.toLowerCase();
   const filtered = allCards.filter(c =>
     c.name.toLowerCase().includes(q) ||
-    c.cardNo.toLowerCase().includes(q) ||
+    c.id.toLowerCase().includes(q) ||
     (c.text && c.text.toLowerCase().includes(q))
   );
   renderCards(filtered);
@@ -82,6 +101,10 @@ document.getElementById("search-box").oninput = (e) => {
 // =========================
 // デッキ追加処理
 // =========================
+let lrigDeck = [];
+let mainBurst = [];
+let mainNoBurst = [];
+
 function addToDeck(card) {
   const img = document.createElement("img");
   img.src = card.image;
@@ -89,10 +112,10 @@ function addToDeck(card) {
 
   img.onclick = () => removeCard(card, img);
 
-  if (card.type === "LRIG") {
+  if (card.type.includes("ルリグ") || card.type.includes("LRIG")) {
     lrigDeck.push(card);
     document.getElementById("lrig-deck").appendChild(img);
-  } else if (card.burst === true) {
+  } else if (card.burst) {
     mainBurst.push(card);
     document.getElementById("main-burst").appendChild(img);
   } else {
@@ -128,25 +151,11 @@ document.getElementById("save-btn").onclick = () => {
 };
 
 // =========================
-// 出力（公式デッキシート形式）
+// 出力
 // =========================
 document.getElementById("export-btn").onclick = () => {
   let text = "";
 
   text += "◆ルリグデッキ\n";
   lrigDeck.forEach((c, i) => {
-    text += `${i+1} ${c.cardNo} ${c.name}\n`;
-  });
-
-  text += "\n◆メインデッキ（ライフバースト有）\n";
-  mainBurst.forEach((c, i) => {
-    text += `${i+1} □ ${c.cardNo} ${c.name}\n`;
-  });
-
-  text += "\n◆メインデッキ（ライフバースト無）\n";
-  mainNoBurst.forEach((c, i) => {
-    text += `${i+21} ${c.cardNo} ${c.name}\n`;
-  });
-
-  alert(text);
-};
+    text += `${i+1} ${c.id} ${c.name
