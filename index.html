@@ -6,13 +6,9 @@
 
 <title>WIXOSS Deck Builder</title>
 
-<!-- jQuery -->
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
 
-<!-- カードデータ -->
 <script src="js/card_info.js"></script>
-
-<!-- メインロジック -->
 <script src="main.js"></script>
 
 <link rel="stylesheet" href="style.css" />
@@ -20,14 +16,12 @@
 
 <body>
 
-<!-- プレイヤー情報 -->
 <div id="player-info">
   ニックネーム：<span id="nickname"></span><br>
   使用ルリグ：<span id="center-lrig"></span><br>
   <button id="open-settings">設定を開く</button>
 </div>
 
-<!-- 設定モーダル -->
 <div id="settings-modal" class="modal">
   <div class="modal-content">
     <h3>設定</h3>
@@ -43,17 +37,14 @@
   </div>
 </div>
 
-<!-- 検索エリア -->
 <div id="search-area">
   <input id="search-box" type="text" placeholder="カード名 / No / テキスト検索">
 </div>
 
-<!-- 検索結果 -->
 <div id="card-list" class="card-grid"></div>
 
 <hr>
 
-<!-- デッキエリア -->
 <h2>◆ ルリグデッキ</h2>
 <div id="lrig-deck" class="deck-row scroll"></div>
 
@@ -63,10 +54,7 @@
 <h2>◆ メインデッキ（ライフバースト無）</h2>
 <div id="main-noburst" class="deck-grid"></div>
 
-<!-- 保存ボタン -->
 <button id="save-btn" class="fab">💾</button>
-
-<!-- 出力ボタン -->
 <button id="export-btn" class="export">📄</button>
 
 </body>
