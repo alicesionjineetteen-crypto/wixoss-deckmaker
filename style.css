@@ -70,13 +70,6 @@ body {
   padding: 10px 0;
 }
 
-.deck-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-  padding: 10px 0;
-}
-
 /* ===== モーダル（設定画面） ===== */
 .modal {
   display: none;
