@@ -381,27 +381,37 @@ async function exportToExcel(templatePath, cellMap) {
       xml = setCellXml(xml, `${cellMap.lrigRightNameCol}${row}`, c.name);
     });
 
-    const mainAll = [...mainBurst, ...mainNoBurst];
+   // ライフバースト無は下段（21〜40枚目、専用欄）から優先的に埋める。
+    // 21枚以上ある場合のみ、あふれた分を上段（有欄）にチェック付きで入れる。
+    const noBurstForSection3 = mainNoBurst.slice(0, 20);
+    const noBurstOverflow = mainNoBurst.slice(20);
 
-    mainAll.forEach((c, i) => {
-      const isBurstless = mainNoBurst.includes(c);
+    const section2Cards = [
+      ...mainBurst.map(c => ({ card: c, checked: false })),
+      ...noBurstOverflow.map(c => ({ card: c, checked: true }))
+    ].slice(0, 20);
 
+    section2Cards.forEach(({ card: c, checked }, i) => {
       if (i < 10) {
         const row = cellMap.section2Rows[i];
         xml = setCellXml(xml, `${cellMap.s2LeftNoCol}${row}`, c.id);
         xml = setCellXml(xml, `${cellMap.s2LeftNameCol}${row}`, c.name);
-        if (isBurstless) xml = setCellXml(xml, `${cellMap.s2LeftCheckCol}${row}`, "レ");
-      } else if (i < 20) {
+        if (checked) xml = setCellXml(xml, `${cellMap.s2LeftCheckCol}${row}`, "レ");
+      } else {
         const row = cellMap.section2Rows[i - 10];
         xml = setCellXml(xml, `${cellMap.s2RightNoCol}${row}`, c.id);
         xml = setCellXml(xml, `${cellMap.s2RightNameCol}${row}`, c.name);
-        if (isBurstless) xml = setCellXml(xml, `${cellMap.s2RightCheckCol}${row}`, "レ");
-      } else if (i < 30) {
-        const row = cellMap.section3Rows[i - 20];
+        if (checked) xml = setCellXml(xml, `${cellMap.s2RightCheckCol}${row}`, "レ");
+      }
+    });
+
+    noBurstForSection3.forEach((c, i) => {
+      if (i < 10) {
+        const row = cellMap.section3Rows[i];
         xml = setCellXml(xml, `${cellMap.s3LeftNoCol}${row}`, c.id);
         xml = setCellXml(xml, `${cellMap.s3LeftNameCol}${row}`, c.name);
-      } else if (i < 40) {
-        const row = cellMap.section3Rows[i - 30];
+      } else {
+        const row = cellMap.section3Rows[i - 10];
         xml = setCellXml(xml, `${cellMap.s3RightNoCol}${row}`, c.id);
         xml = setCellXml(xml, `${cellMap.s3RightNameCol}${row}`, c.name);
       }
