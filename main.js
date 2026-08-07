@@ -261,5 +261,4 @@ document.getElementById("export-excel-team-btn").onclick = () => {
 
 document.getElementById("export-excel-solo-btn").onclick = () => {
   exportToExcel("wixoss_ceremony_decklist.xlsx", soloCellMap);
-};した");
 };
