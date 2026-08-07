@@ -67,24 +67,58 @@ document.getElementById("save-settings").onclick = () => {
 // =========================
 // 検索結果表示
 // =========================
+const MAX_RESULTS = 60;
+
 function renderCards(cards) {
   const list = document.getElementById("card-list");
   list.innerHTML = "";
 
-  cards.forEach(card => {
+  const shown = cards.slice(0, MAX_RESULTS);
+
+  shown.forEach(card => {
     const img = document.createElement("img");
     img.src = card.image;
     img.className = "card-img";
+    img.loading = "lazy";
 
     img.onclick = () => addToDeck(card);
 
     list.appendChild(img);
   });
+
+  if (cards.length > MAX_RESULTS) {
+    const notice = document.createElement("p");
+    notice.className = "search-notice";
+    notice.textContent = `${cards.length}件ヒット（先頭${MAX_RESULTS}件を表示中。キーワードを追加して絞り込んでください）`;
+    list.appendChild(notice);
+  }
 }
 
-// 初期表示
-renderCards(allCards);
+// 初期表示は空。検索するまでカードを描画しない
+renderCards([]);
 
+// =========================
+// 検索処理（デバウンス付き）
+// =========================
+let searchTimer = null;
+
+document.getElementById("search-box").oninput = (e) => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.toLowerCase();
+
+  searchTimer = setTimeout(() => {
+    if (q === "") {
+      renderCards([]);
+      return;
+    }
+    const filtered = allCards.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      c.id.toLowerCase().includes(q) ||
+      (c.text && c.text.toLowerCase().includes(q))
+    );
+    renderCards(filtered);
+  }, 250);
+};
 // =========================
 // 検索処理
 // =========================
