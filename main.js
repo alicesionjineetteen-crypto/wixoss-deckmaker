@@ -18,7 +18,7 @@ function convertCard(raw) {
     power: raw[10],
     coin: raw[11],
     timing: raw[12],
-   burst: raw[13] !== "" && raw[13] !== "0",   // LB が空・"0" 以外ならライフバースト
+    burst: raw[13] !== "" && raw[13] !== "0",   // LB が空・"0" 以外ならライフバースト
     team: raw[14],
     story: raw[15],
     text: raw[16],           // 日本語テキスト
@@ -136,53 +136,215 @@ function removeCard(card, img) {
 }
 
 // =========================
-// 保存
+// デッキ表示を配列から再描画（呼び出し時に使用）
 // =========================
-document.getElementById("save-btn").onclick = () => {
-  const deck = {
-    player: localStorage.getItem("playerName"),
-    centerLrig: localStorage.getItem("centerLrig"),
-    lrigDeck,
-    mainBurst,
-    mainNoBurst
-  };
-  localStorage.setItem("savedDeck", JSON.stringify(deck));
-  alert("保存しました");
+function renderDeckArea(elementId, cards) {
+  const container = document.getElementById(elementId);
+  container.innerHTML = "";
+  cards.forEach(card => {
+    const img = document.createElement("img");
+    img.src = card.image;
+    img.className = "card-img";
+    img.onclick = () => removeCard(card, img);
+    container.appendChild(img);
+  });
+}
+
+// =========================
+// テキスト出力（クリップボードコピー）
+// =========================
+document.getElementById("export-btn").onclick = () => {
+  let text = "";
+
+  text += "◆ルリグデッキ\n";
+  lrigDeck.forEach((c, i) => {
+    text += `${i + 1} ${c.id} ${c.name}\n`;
+  });
+
+  text += "\n◆メインデッキ（ライフバースト有）\n";
+  mainBurst.forEach((c, i) => {
+    text += `${i + 1} ${c.id} ${c.name}\n`;
+  });
+
+  text += "\n◆メインデッキ（ライフバースト無）\n";
+  mainNoBurst.forEach((c, i) => {
+    text += `${i + 1} ${c.id} ${c.name}\n`;
+  });
+
+  console.log(text);
+  navigator.clipboard.writeText(text);
+  alert("デッキリストをクリップボードにコピーしました");
 };
 
 // =========================
-// Excel出力（チーム戦／個人戦 共通ロジック）
+// 複数デッキ保存・呼び出し
 // =========================
+function getSavedDecks() {
+  return JSON.parse(localStorage.getItem("savedDecks") || "{}");
+}
+
+function setSavedDecks(decks) {
+  localStorage.setItem("savedDecks", JSON.stringify(decks));
+}
+
+function renderDeckList() {
+  const decks = getSavedDecks();
+  const listEl = document.getElementById("deck-list");
+  listEl.innerHTML = "";
+
+  const names = Object.keys(decks);
+  if (names.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "（保存されたデッキはありません）";
+    listEl.appendChild(li);
+    return;
+  }
+
+  names.forEach(name => {
+    const li = document.createElement("li");
+
+    const label = document.createElement("span");
+    label.textContent = name;
+
+    const loadBtn = document.createElement("button");
+    loadBtn.textContent = "読み込む";
+    loadBtn.onclick = () => loadDeck(name);
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "削除";
+    delBtn.onclick = () => {
+      if (confirm(`「${name}」を削除しますか？`)) {
+        const d = getSavedDecks();
+        delete d[name];
+        setSavedDecks(d);
+        renderDeckList();
+      }
+    };
+
+    li.appendChild(label);
+    li.appendChild(loadBtn);
+    li.appendChild(delBtn);
+    listEl.appendChild(li);
+  });
+}
+
+function loadDeck(name) {
+  const decks = getSavedDecks();
+  const deck = decks[name];
+  if (!deck) {
+    alert("そのデッキが見つかりませんでした");
+    return;
+  }
+
+  lrigDeck = deck.lrigDeck || [];
+  mainBurst = deck.mainBurst || [];
+  mainNoBurst = deck.mainNoBurst || [];
+
+  renderDeckArea("lrig-deck", lrigDeck);
+  renderDeckArea("main-burst", mainBurst);
+  renderDeckArea("main-noburst", mainNoBurst);
+
+  document.getElementById("deck-manager-modal").style.display = "none";
+  alert(`「${name}」を読み込みました`);
+}
+
+document.getElementById("save-btn").onclick = () => {
+  renderDeckList();
+  document.getElementById("deck-manager-modal").style.display = "block";
+};
+
+document.getElementById("deck-save-confirm").onclick = () => {
+  const name = document.getElementById("deck-save-name").value.trim();
+  if (!name) {
+    alert("デッキ名を入力してください");
+    return;
+  }
+
+  const decks = getSavedDecks();
+  decks[name] = {
+    lrigDeck,
+    mainBurst,
+    mainNoBurst,
+    savedAt: new Date().toISOString()
+  };
+  setSavedDecks(decks);
+
+  document.getElementById("deck-save-name").value = "";
+  renderDeckList();
+  alert(`「${name}」として保存しました`);
+};
+
+document.getElementById("close-deck-manager").onclick = () => {
+  document.getElementById("deck-manager-modal").style.display = "none";
+};
+
+// =========================
+// Excel出力モーダル開閉
+// =========================
+document.getElementById("open-export-modal").onclick = () => {
+  document.getElementById("export-modal").style.display = "block";
+};
+
+document.getElementById("close-export-modal").onclick = () => {
+  document.getElementById("export-modal").style.display = "none";
+};
+
+// =========================
+// Excel出力（xlsxのZIP内XMLを直接書き換え、画像・印刷設定を保持）
+// =========================
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function setCellXml(xml, addr, value) {
+  const escaped = escapeXml(value);
+  const selfClosing = new RegExp(`<c r="${addr}"([^>]*)/>`);
+  const withValue = new RegExp(`<c r="${addr}"([^>]*)>.*?</c>`);
+
+  const buildReplacement = (attrs) => {
+    const cleanAttrs = attrs.replace(/\s*t="[^"]*"/, "");
+    return `<c r="${addr}"${cleanAttrs} t="inlineStr"><is><t xml:space="preserve">${escaped}</t></is></c>`;
+  };
+
+  if (selfClosing.test(xml)) {
+    return xml.replace(selfClosing, (m, attrs) => buildReplacement(attrs));
+  } else if (withValue.test(xml)) {
+    return xml.replace(withValue, (m, attrs) => buildReplacement(attrs));
+  }
+  console.warn(`セル ${addr} がテンプレート内に見つかりませんでした`);
+  return xml;
+}
+
 async function exportToExcel(templatePath, cellMap) {
   try {
     const res = await fetch(templatePath);
     if (!res.ok) throw new Error("テンプレートファイルが見つかりません: " + templatePath);
     const buf = await res.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array", cellStyles: true });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+    const zip = await JSZip.loadAsync(buf);
 
-    const setCell = (addr, value) => {
-      const t = typeof value === "number" ? "n" : "s";
-      if (ws[addr]) {
-        ws[addr].v = value;
-        ws[addr].t = t;
-      } else {
-        ws[addr] = { t, v: value };
-      }
-    };
+    const sheetPath = "xl/worksheets/sheet1.xml";
+    const sheetFile = zip.file(sheetPath);
+    if (!sheetFile) throw new Error("テンプレート内にsheet1.xmlが見つかりません");
 
-    setCell(cellMap.nickname, localStorage.getItem("playerName") || "");
-    setCell(cellMap.centerLrig, localStorage.getItem("centerLrig") || "");
+    let xml = await sheetFile.async("string");
+
+    xml = setCellXml(xml, cellMap.nickname, localStorage.getItem("playerName") || "");
+    xml = setCellXml(xml, cellMap.centerLrig, localStorage.getItem("centerLrig") || "");
 
     lrigDeck.slice(0, 6).forEach((c, i) => {
       const row = cellMap.lrigRows[i];
-      setCell(`${cellMap.lrigLeftNoCol}${row}`, c.id);
-      setCell(`${cellMap.lrigLeftNameCol}${row}`, c.name);
+      xml = setCellXml(xml, `${cellMap.lrigLeftNoCol}${row}`, c.id);
+      xml = setCellXml(xml, `${cellMap.lrigLeftNameCol}${row}`, c.name);
     });
     lrigDeck.slice(6, 12).forEach((c, i) => {
       const row = cellMap.lrigRows[i];
-      setCell(`${cellMap.lrigRightNoCol}${row}`, c.id);
-      setCell(`${cellMap.lrigRightNameCol}${row}`, c.name);
+      xml = setCellXml(xml, `${cellMap.lrigRightNoCol}${row}`, c.id);
+      xml = setCellXml(xml, `${cellMap.lrigRightNameCol}${row}`, c.name);
     });
 
     const mainAll = [...mainBurst, ...mainNoBurst];
@@ -192,33 +354,36 @@ async function exportToExcel(templatePath, cellMap) {
 
       if (i < 10) {
         const row = cellMap.section2Rows[i];
-        setCell(`${cellMap.s2LeftNoCol}${row}`, c.id);
-        setCell(`${cellMap.s2LeftNameCol}${row}`, c.name);
-        if (isBurstless) setCell(`${cellMap.s2LeftCheckCol}${row}`, "レ");
+        xml = setCellXml(xml, `${cellMap.s2LeftNoCol}${row}`, c.id);
+        xml = setCellXml(xml, `${cellMap.s2LeftNameCol}${row}`, c.name);
+        if (isBurstless) xml = setCellXml(xml, `${cellMap.s2LeftCheckCol}${row}`, "レ");
       } else if (i < 20) {
         const row = cellMap.section2Rows[i - 10];
-        setCell(`${cellMap.s2RightNoCol}${row}`, c.id);
-        setCell(`${cellMap.s2RightNameCol}${row}`, c.name);
-        if (isBurstless) setCell(`${cellMap.s2RightCheckCol}${row}`, "レ");
+        xml = setCellXml(xml, `${cellMap.s2RightNoCol}${row}`, c.id);
+        xml = setCellXml(xml, `${cellMap.s2RightNameCol}${row}`, c.name);
+        if (isBurstless) xml = setCellXml(xml, `${cellMap.s2RightCheckCol}${row}`, "レ");
       } else if (i < 30) {
         const row = cellMap.section3Rows[i - 20];
-        setCell(`${cellMap.s3LeftNoCol}${row}`, c.id);
-        setCell(`${cellMap.s3LeftNameCol}${row}`, c.name);
+        xml = setCellXml(xml, `${cellMap.s3LeftNoCol}${row}`, c.id);
+        xml = setCellXml(xml, `${cellMap.s3LeftNameCol}${row}`, c.name);
       } else if (i < 40) {
         const row = cellMap.section3Rows[i - 30];
-        setCell(`${cellMap.s3RightNoCol}${row}`, c.id);
-        setCell(`${cellMap.s3RightNameCol}${row}`, c.name);
+        xml = setCellXml(xml, `${cellMap.s3RightNoCol}${row}`, c.id);
+        xml = setCellXml(xml, `${cellMap.s3RightNameCol}${row}`, c.name);
       }
     });
 
-    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([out], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
+    zip.file(sheetPath, xml);
+
+    const out = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(out);
     const a = document.createElement("a");
     a.href = url;
     a.download = `deck_${localStorage.getItem("playerName") || "unnamed"}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
+
+    document.getElementById("export-modal").style.display = "none";
   } catch (err) {
     console.error(err);
     alert("Excel出力に失敗しました。コンソールを確認してください。");
