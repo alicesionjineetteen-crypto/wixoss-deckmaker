@@ -7,8 +7,11 @@
 <title>WIXOSS Deck Builder</title>
 
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+
 <script src="js/card_info.js" defer></script>
 <script src="main.js" defer></script>
+
 <link rel="stylesheet" href="style.css" />
 </head>
 
@@ -35,6 +38,21 @@
   </div>
 </div>
 
+<div id="deck-manager-modal" class="modal">
+  <div class="modal-content">
+    <h3>デッキの保存・呼び出し</h3>
+
+    <input id="deck-save-name" type="text" placeholder="デッキ名を入力">
+    <button id="deck-save-confirm">この内容で保存</button>
+
+    <hr>
+
+    <ul id="deck-list"></ul>
+
+    <button id="close-deck-manager">閉じる</button>
+  </div>
+</div>
+
 <div id="search-area">
   <input id="search-box" type="text" placeholder="カード名 / No / テキスト検索">
 </div>
@@ -54,6 +72,8 @@
 
 <button id="save-btn" class="fab">💾</button>
 <button id="export-btn" class="export">📄</button>
+<button id="export-excel-team-btn" class="export">📊チーム</button>
+<button id="export-excel-solo-btn" class="export">📊個人</button>
 
 </body>
 </html>
