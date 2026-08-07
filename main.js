@@ -158,4 +158,20 @@ document.getElementById("export-btn").onclick = () => {
 
   text += "◆ルリグデッキ\n";
   lrigDeck.forEach((c, i) => {
-    text += `${i+1} ${c.id} ${c.name
+    text += `${i + 1} ${c.id} ${c.name}\n`;
+  });
+
+  text += "\n◆メインデッキ（ライフバースト有）\n";
+  mainBurst.forEach((c, i) => {
+    text += `${i + 1} ${c.id} ${c.name}\n`;
+  });
+
+  text += "\n◆メインデッキ（ライフバースト無）\n";
+  mainNoBurst.forEach((c, i) => {
+    text += `${i + 1} ${c.id} ${c.name}\n`;
+  });
+
+  console.log(text);
+  navigator.clipboard.writeText(text);
+  alert("デッキリストをクリップボードにコピーしました");
+};
