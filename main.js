@@ -151,27 +151,115 @@ document.getElementById("save-btn").onclick = () => {
 };
 
 // =========================
-// 出力
+// Excel出力（チーム戦／個人戦 共通ロジック）
 // =========================
-document.getElementById("export-btn").onclick = () => {
-  let text = "";
+async function exportToExcel(templatePath, cellMap) {
+  try {
+    const res = await fetch(templatePath);
+    if (!res.ok) throw new Error("テンプレートファイルが見つかりません: " + templatePath);
+    const buf = await res.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array", cellStyles: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
 
-  text += "◆ルリグデッキ\n";
-  lrigDeck.forEach((c, i) => {
-    text += `${i + 1} ${c.id} ${c.name}\n`;
-  });
+    const setCell = (addr, value) => {
+      const t = typeof value === "number" ? "n" : "s";
+      if (ws[addr]) {
+        ws[addr].v = value;
+        ws[addr].t = t;
+      } else {
+        ws[addr] = { t, v: value };
+      }
+    };
 
-  text += "\n◆メインデッキ（ライフバースト有）\n";
-  mainBurst.forEach((c, i) => {
-    text += `${i + 1} ${c.id} ${c.name}\n`;
-  });
+    setCell(cellMap.nickname, localStorage.getItem("playerName") || "");
+    setCell(cellMap.centerLrig, localStorage.getItem("centerLrig") || "");
 
-  text += "\n◆メインデッキ（ライフバースト無）\n";
-  mainNoBurst.forEach((c, i) => {
-    text += `${i + 1} ${c.id} ${c.name}\n`;
-  });
+    lrigDeck.slice(0, 6).forEach((c, i) => {
+      const row = cellMap.lrigRows[i];
+      setCell(`${cellMap.lrigLeftNoCol}${row}`, c.id);
+      setCell(`${cellMap.lrigLeftNameCol}${row}`, c.name);
+    });
+    lrigDeck.slice(6, 12).forEach((c, i) => {
+      const row = cellMap.lrigRows[i];
+      setCell(`${cellMap.lrigRightNoCol}${row}`, c.id);
+      setCell(`${cellMap.lrigRightNameCol}${row}`, c.name);
+    });
 
-  console.log(text);
-  navigator.clipboard.writeText(text);
-  alert("デッキリストをクリップボードにコピーしました");
+    const mainAll = [...mainBurst, ...mainNoBurst];
+
+    mainAll.forEach((c, i) => {
+      const isBurstless = mainNoBurst.includes(c);
+
+      if (i < 10) {
+        const row = cellMap.section2Rows[i];
+        setCell(`${cellMap.s2LeftNoCol}${row}`, c.id);
+        setCell(`${cellMap.s2LeftNameCol}${row}`, c.name);
+        if (isBurstless) setCell(`${cellMap.s2LeftCheckCol}${row}`, "レ");
+      } else if (i < 20) {
+        const row = cellMap.section2Rows[i - 10];
+        setCell(`${cellMap.s2RightNoCol}${row}`, c.id);
+        setCell(`${cellMap.s2RightNameCol}${row}`, c.name);
+        if (isBurstless) setCell(`${cellMap.s2RightCheckCol}${row}`, "レ");
+      } else if (i < 30) {
+        const row = cellMap.section3Rows[i - 20];
+        setCell(`${cellMap.s3LeftNoCol}${row}`, c.id);
+        setCell(`${cellMap.s3LeftNameCol}${row}`, c.name);
+      } else if (i < 40) {
+        const row = cellMap.section3Rows[i - 30];
+        setCell(`${cellMap.s3RightNoCol}${row}`, c.id);
+        setCell(`${cellMap.s3RightNameCol}${row}`, c.name);
+      }
+    });
+
+    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([out], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `deck_${localStorage.getItem("playerName") || "unnamed"}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error(err);
+    alert("Excel出力に失敗しました。コンソールを確認してください。");
+  }
+}
+
+// チーム戦用セル配置
+const teamCellMap = {
+  nickname: "I9",
+  centerLrig: "L4",
+  lrigRows: [16, 17, 18, 19, 20, 21],
+  lrigLeftNoCol: "C", lrigLeftNameCol: "D",
+  lrigRightNoCol: "G", lrigRightNameCol: "H",
+  section2Rows: [25, 26, 27, 28, 29, 30, 31, 32, 33, 34],
+  s2LeftNoCol: "C", s2LeftCheckCol: "D", s2LeftNameCol: "E",
+  s2RightNoCol: "G", s2RightCheckCol: "H", s2RightNameCol: "I",
+  section3Rows: [38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+  s3LeftNoCol: "C", s3LeftNameCol: "D",
+  s3RightNoCol: "G", s3RightNameCol: "H"
+};
+
+// 個人戦用セル配置
+const soloCellMap = {
+  nickname: "H2",
+  centerLrig: "H9",
+  lrigRows: [14, 15, 16, 17, 18, 19],
+  lrigLeftNoCol: "B", lrigLeftNameCol: "C",
+  lrigRightNoCol: "F", lrigRightNameCol: "G",
+  section2Rows: [23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
+  s2LeftNoCol: "B", s2LeftCheckCol: "C", s2LeftNameCol: "D",
+  s2RightNoCol: "F", s2RightCheckCol: "G", s2RightNameCol: "H",
+  section3Rows: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
+  s3LeftNoCol: "B", s3LeftNameCol: "C",
+  s3RightNoCol: "F", s3RightNameCol: "G"
+};
+
+document.getElementById("export-excel-team-btn").onclick = () => {
+  exportToExcel("wixoss_decklist_team.xlsx", teamCellMap);
+};
+
+document.getElementById("export-excel-solo-btn").onclick = () => {
+  exportToExcel("wixoss_ceremony_decklist.xlsx", soloCellMap);
+};した");
 };
