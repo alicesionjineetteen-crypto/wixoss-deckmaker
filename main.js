@@ -18,7 +18,7 @@ function convertCard(raw) {
     power: raw[10],
     coin: raw[11],
     timing: raw[12],
-    burst: raw[13] !== "",   // LB が空でなければライフバースト
+   burst: raw[13] !== "" && raw[13] !== "0",   // LB が空・"0" 以外ならライフバースト
     team: raw[14],
     story: raw[15],
     text: raw[16],           // 日本語テキスト
