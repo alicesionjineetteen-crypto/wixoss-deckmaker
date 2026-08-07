@@ -1,429 +1,91 @@
-// =========================
-// カードデータ読み込み
-// =========================
-
-// cardData をオブジェクト形式に変換
-function convertCard(raw) {
-  return {
-    id: raw[0],
-    image: raw[1],
-    name: raw[2],
-    rare: raw[3],
-    type: raw[4],
-    class: raw[5],
-    color: raw[6],
-    level: raw[7],
-    cost: raw[8],
-    limit: raw[9],
-    power: raw[10],
-    coin: raw[11],
-    timing: raw[12],
-    burst: raw[13] !== "" && raw[13] !== "0",   // LB が空・"0" 以外ならライフバースト
-    team: raw[14],
-    story: raw[15],
-    text: raw[16],           // 日本語テキスト
-    ban: raw[18]
-  };
-}
-
-let allCards = cardData.map(convertCard);
-
-// =========================
-// プレイヤー情報読み込み
-// =========================
-document.getElementById("nickname").innerText =
-  localStorage.getItem("playerName") || "未設定";
-
-document.getElementById("center-lrig").innerText =
-  localStorage.getItem("centerLrig") || "未設定";
-
-// =========================
-// 設定モーダル開閉
-// =========================
-document.getElementById("open-settings").onclick = () => {
-  document.getElementById("settings-modal").style.display = "block";
-};
-
-document.getElementById("close-settings").onclick = () => {
-  document.getElementById("settings-modal").style.display = "none";
-};
-
-// =========================
-// 設定保存
-// =========================
-document.getElementById("save-settings").onclick = () => {
-  const name = document.getElementById("nickname-input").value;
-  const lrig = document.getElementById("lrig-input").value;
-
-  localStorage.setItem("playerName", name);
-  localStorage.setItem("centerLrig", lrig);
-
-  document.getElementById("nickname").innerText = name;
-  document.getElementById("center-lrig").innerText = lrig;
-
-  alert("設定を保存しました");
-};
-
-// =========================
-// 検索結果表示
-// =========================
-function renderCards(cards) {
-  const list = document.getElementById("card-list");
-  list.innerHTML = "";
-
-  cards.forEach(card => {
-    const img = document.createElement("img");
-    img.src = card.image;
-    img.className = "card-img";
-
-    img.onclick = () => addToDeck(card);
-
-    list.appendChild(img);
-  });
-}
-
-// 初期表示
-renderCards(allCards);
-
-// =========================
-// 検索処理
-// =========================
-document.getElementById("search-box").oninput = (e) => {
-  const q = e.target.value.toLowerCase();
-  const filtered = allCards.filter(c =>
-    c.name.toLowerCase().includes(q) ||
-    c.id.toLowerCase().includes(q) ||
-    (c.text && c.text.toLowerCase().includes(q))
-  );
-  renderCards(filtered);
-};
-
-// =========================
-// デッキ追加処理
-// =========================
-let lrigDeck = [];
-let mainBurst = [];
-let mainNoBurst = [];
-
-function addToDeck(card) {
-  const img = document.createElement("img");
-  img.src = card.image;
-  img.className = "card-img";
-
-  img.onclick = () => removeCard(card, img);
-
-  if (card.type.includes("ルリグ") || card.type.includes("LRIG")) {
-    lrigDeck.push(card);
-    document.getElementById("lrig-deck").appendChild(img);
-  } else if (card.burst) {
-    mainBurst.push(card);
-    document.getElementById("main-burst").appendChild(img);
-  } else {
-    mainNoBurst.push(card);
-    document.getElementById("main-noburst").appendChild(img);
-  }
-}
-
-// =========================
-// カード削除
-// =========================
-function removeCard(card, img) {
-  img.remove();
-
-  lrigDeck = lrigDeck.filter(c => c !== card);
-  mainBurst = mainBurst.filter(c => c !== card);
-  mainNoBurst = mainNoBurst.filter(c => c !== card);
-}
-
-// =========================
-// デッキ表示を配列から再描画（呼び出し時に使用）
-// =========================
-function renderDeckArea(elementId, cards) {
-  const container = document.getElementById(elementId);
-  container.innerHTML = "";
-  cards.forEach(card => {
-    const img = document.createElement("img");
-    img.src = card.image;
-    img.className = "card-img";
-    img.onclick = () => removeCard(card, img);
-    container.appendChild(img);
-  });
-}
-
-// =========================
-// テキスト出力（クリップボードコピー）
-// =========================
-document.getElementById("export-btn").onclick = () => {
-  let text = "";
-
-  text += "◆ルリグデッキ\n";
-  lrigDeck.forEach((c, i) => {
-    text += `${i + 1} ${c.id} ${c.name}\n`;
-  });
-
-  text += "\n◆メインデッキ（ライフバースト有）\n";
-  mainBurst.forEach((c, i) => {
-    text += `${i + 1} ${c.id} ${c.name}\n`;
-  });
-
-  text += "\n◆メインデッキ（ライフバースト無）\n";
-  mainNoBurst.forEach((c, i) => {
-    text += `${i + 1} ${c.id} ${c.name}\n`;
-  });
-
-  console.log(text);
-  navigator.clipboard.writeText(text);
-  alert("デッキリストをクリップボードにコピーしました");
-};
-
-// =========================
-// 複数デッキ保存・呼び出し
-// =========================
-function getSavedDecks() {
-  return JSON.parse(localStorage.getItem("savedDecks") || "{}");
-}
-
-function setSavedDecks(decks) {
-  localStorage.setItem("savedDecks", JSON.stringify(decks));
-}
-
-function renderDeckList() {
-  const decks = getSavedDecks();
-  const listEl = document.getElementById("deck-list");
-  listEl.innerHTML = "";
-
-  const names = Object.keys(decks);
-  if (names.length === 0) {
-    const li = document.createElement("li");
-    li.textContent = "（保存されたデッキはありません）";
-    listEl.appendChild(li);
-    return;
-  }
-
-  names.forEach(name => {
-    const li = document.createElement("li");
-
-    const label = document.createElement("span");
-    label.textContent = name;
-
-    const loadBtn = document.createElement("button");
-    loadBtn.textContent = "読み込む";
-    loadBtn.onclick = () => loadDeck(name);
-
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "削除";
-    delBtn.onclick = () => {
-      if (confirm(`「${name}」を削除しますか？`)) {
-        const d = getSavedDecks();
-        delete d[name];
-        setSavedDecks(d);
-        renderDeckList();
-      }
-    };
-
-    li.appendChild(label);
-    li.appendChild(loadBtn);
-    li.appendChild(delBtn);
-    listEl.appendChild(li);
-  });
-}
-
-function loadDeck(name) {
-  const decks = getSavedDecks();
-  const deck = decks[name];
-  if (!deck) {
-    alert("そのデッキが見つかりませんでした");
-    return;
-  }
-
-  lrigDeck = deck.lrigDeck || [];
-  mainBurst = deck.mainBurst || [];
-  mainNoBurst = deck.mainNoBurst || [];
-
-  renderDeckArea("lrig-deck", lrigDeck);
-  renderDeckArea("main-burst", mainBurst);
-  renderDeckArea("main-noburst", mainNoBurst);
-
-  document.getElementById("deck-manager-modal").style.display = "none";
-  alert(`「${name}」を読み込みました`);
-}
-
-document.getElementById("save-btn").onclick = () => {
-  renderDeckList();
-  document.getElementById("deck-manager-modal").style.display = "block";
-};
-
-document.getElementById("deck-save-confirm").onclick = () => {
-  const name = document.getElementById("deck-save-name").value.trim();
-  if (!name) {
-    alert("デッキ名を入力してください");
-    return;
-  }
-
-  const decks = getSavedDecks();
-  decks[name] = {
-    lrigDeck,
-    mainBurst,
-    mainNoBurst,
-    savedAt: new Date().toISOString()
-  };
-  setSavedDecks(decks);
-
-  document.getElementById("deck-save-name").value = "";
-  renderDeckList();
-  alert(`「${name}」として保存しました`);
-};
-
-document.getElementById("close-deck-manager").onclick = () => {
-  document.getElementById("deck-manager-modal").style.display = "none";
-};
-
-// =========================
-// Excel出力モーダル開閉
-// =========================
-document.getElementById("open-export-modal").onclick = () => {
-  document.getElementById("export-modal").style.display = "block";
-};
-
-document.getElementById("close-export-modal").onclick = () => {
-  document.getElementById("export-modal").style.display = "none";
-};
-
-// =========================
-// Excel出力（xlsxのZIP内XMLを直接書き換え、画像・印刷設定を保持）
-// =========================
-function escapeXml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-function setCellXml(xml, addr, value) {
-  const escaped = escapeXml(value);
-  const selfClosing = new RegExp(`<c r="${addr}"([^>]*)/>`);
-  const withValue = new RegExp(`<c r="${addr}"([^>]*)>.*?</c>`);
-
-  const buildReplacement = (attrs) => {
-    const cleanAttrs = attrs.replace(/\s*t="[^"]*"/, "");
-    return `<c r="${addr}"${cleanAttrs} t="inlineStr"><is><t xml:space="preserve">${escaped}</t></is></c>`;
-  };
-
-  if (selfClosing.test(xml)) {
-    return xml.replace(selfClosing, (m, attrs) => buildReplacement(attrs));
-  } else if (withValue.test(xml)) {
-    return xml.replace(withValue, (m, attrs) => buildReplacement(attrs));
-  }
-  console.warn(`セル ${addr} がテンプレート内に見つかりませんでした`);
-  return xml;
-}
-
-async function exportToExcel(templatePath, cellMap) {
-  try {
-    const res = await fetch(templatePath);
-    if (!res.ok) throw new Error("テンプレートファイルが見つかりません: " + templatePath);
-    const buf = await res.arrayBuffer();
-    const zip = await JSZip.loadAsync(buf);
-
-    const sheetPath = "xl/worksheets/sheet1.xml";
-    const sheetFile = zip.file(sheetPath);
-    if (!sheetFile) throw new Error("テンプレート内にsheet1.xmlが見つかりません");
-
-    let xml = await sheetFile.async("string");
-
-    xml = setCellXml(xml, cellMap.nickname, localStorage.getItem("playerName") || "");
-    xml = setCellXml(xml, cellMap.centerLrig, localStorage.getItem("centerLrig") || "");
-
-    lrigDeck.slice(0, 6).forEach((c, i) => {
-      const row = cellMap.lrigRows[i];
-      xml = setCellXml(xml, `${cellMap.lrigLeftNoCol}${row}`, c.id);
-      xml = setCellXml(xml, `${cellMap.lrigLeftNameCol}${row}`, c.name);
-    });
-    lrigDeck.slice(6, 12).forEach((c, i) => {
-      const row = cellMap.lrigRows[i];
-      xml = setCellXml(xml, `${cellMap.lrigRightNoCol}${row}`, c.id);
-      xml = setCellXml(xml, `${cellMap.lrigRightNameCol}${row}`, c.name);
-    });
-
-    const mainAll = [...mainBurst, ...mainNoBurst];
-
-    mainAll.forEach((c, i) => {
-      const isBurstless = mainNoBurst.includes(c);
-
-      if (i < 10) {
-        const row = cellMap.section2Rows[i];
-        xml = setCellXml(xml, `${cellMap.s2LeftNoCol}${row}`, c.id);
-        xml = setCellXml(xml, `${cellMap.s2LeftNameCol}${row}`, c.name);
-        if (isBurstless) xml = setCellXml(xml, `${cellMap.s2LeftCheckCol}${row}`, "レ");
-      } else if (i < 20) {
-        const row = cellMap.section2Rows[i - 10];
-        xml = setCellXml(xml, `${cellMap.s2RightNoCol}${row}`, c.id);
-        xml = setCellXml(xml, `${cellMap.s2RightNameCol}${row}`, c.name);
-        if (isBurstless) xml = setCellXml(xml, `${cellMap.s2RightCheckCol}${row}`, "レ");
-      } else if (i < 30) {
-        const row = cellMap.section3Rows[i - 20];
-        xml = setCellXml(xml, `${cellMap.s3LeftNoCol}${row}`, c.id);
-        xml = setCellXml(xml, `${cellMap.s3LeftNameCol}${row}`, c.name);
-      } else if (i < 40) {
-        const row = cellMap.section3Rows[i - 30];
-        xml = setCellXml(xml, `${cellMap.s3RightNoCol}${row}`, c.id);
-        xml = setCellXml(xml, `${cellMap.s3RightNameCol}${row}`, c.name);
-      }
-    });
-
-    zip.file(sheetPath, xml);
-
-    const out = await zip.generateAsync({ type: "blob" });
-    const url = URL.createObjectURL(out);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `deck_${localStorage.getItem("playerName") || "unnamed"}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    document.getElementById("export-modal").style.display = "none";
-  } catch (err) {
-    console.error(err);
-    alert("Excel出力に失敗しました。コンソールを確認してください。");
-  }
-}
-
-// チーム戦用セル配置
-const teamCellMap = {
-  nickname: "I9",
-  centerLrig: "L4",
-  lrigRows: [16, 17, 18, 19, 20, 21],
-  lrigLeftNoCol: "C", lrigLeftNameCol: "D",
-  lrigRightNoCol: "G", lrigRightNameCol: "H",
-  section2Rows: [25, 26, 27, 28, 29, 30, 31, 32, 33, 34],
-  s2LeftNoCol: "C", s2LeftCheckCol: "D", s2LeftNameCol: "E",
-  s2RightNoCol: "G", s2RightCheckCol: "H", s2RightNameCol: "I",
-  section3Rows: [38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
-  s3LeftNoCol: "C", s3LeftNameCol: "D",
-  s3RightNoCol: "G", s3RightNameCol: "H"
-};
-
-// 個人戦用セル配置
-const soloCellMap = {
-  nickname: "H2",
-  centerLrig: "H9",
-  lrigRows: [14, 15, 16, 17, 18, 19],
-  lrigLeftNoCol: "B", lrigLeftNameCol: "C",
-  lrigRightNoCol: "F", lrigRightNameCol: "G",
-  section2Rows: [23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
-  s2LeftNoCol: "B", s2LeftCheckCol: "C", s2LeftNameCol: "D",
-  s2RightNoCol: "F", s2RightCheckCol: "G", s2RightNameCol: "H",
-  section3Rows: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45],
-  s3LeftNoCol: "B", s3LeftNameCol: "C",
-  s3RightNoCol: "F", s3RightNameCol: "G"
-};
-
-document.getElementById("export-excel-team-btn").onclick = () => {
-  exportToExcel("wixoss_decklist_team.xlsx", teamCellMap);
-};
-
-document.getElementById("export-excel-solo-btn").onclick = () => {
-  exportToExcel("wixoss_ceremony_decklist.xlsx", soloCellMap);
-};
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<title>WIXOSS Deck Builder</title>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+
+<script src="js/card_info.js" defer></script>
+<script src="main.js" defer></script>
+
+<link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+<div id="player-info">
+  ニックネーム：<span id="nickname"></span><br>
+  使用ルリグ：<span id="center-lrig"></span><br>
+  <button id="open-settings">設定を開く</button>
+</div>
+
+<div id="settings-modal" class="modal">
+  <div class="modal-content">
+    <h3>設定</h3>
+
+    <label>ニックネーム</label>
+    <input id="nickname-input" type="text">
+
+    <label>使用ルリグ（カード名）</label>
+    <input id="lrig-input" type="text">
+
+    <button id="save-settings">保存</button>
+    <button id="close-settings">閉じる</button>
+  </div>
+</div>
+
+<div id="deck-manager-modal" class="modal">
+  <div class="modal-content">
+    <h3>デッキの保存・呼び出し</h3>
+
+    <input id="deck-save-name" type="text" placeholder="デッキ名を入力">
+    <button id="deck-save-confirm">この内容で保存</button>
+
+    <hr>
+
+    <ul id="deck-list"></ul>
+
+    <button id="close-deck-manager">閉じる</button>
+  </div>
+</div>
+
+<div id="export-modal" class="modal">
+  <div class="modal-content">
+    <h3>Excel出力</h3>
+
+    <button id="export-excel-team-btn">チーム戦用シートで出力</button>
+    <button id="export-excel-solo-btn">個人戦用シートで出力</button>
+
+    <hr>
+
+    <button id="close-export-modal">閉じる</button>
+  </div>
+</div>
+
+<div id="search-area">
+  <input id="search-box" type="text" placeholder="カード名 / No / テキスト検索">
+</div>
+
+<div id="card-list" class="card-grid"></div>
+
+<hr>
+
+<h2>◆ ルリグデッキ</h2>
+<div id="lrig-deck" class="deck-row scroll"></div>
+
+<h2>◆ メインデッキ（ライフバースト有）</h2>
+<div id="main-burst" class="deck-grid"></div>
+
+<h2>◆ メインデッキ（ライフバースト無）</h2>
+<div id="main-noburst" class="deck-grid"></div>
+
+<button id="save-btn" class="fab">💾</button>
+<button id="export-btn" class="export">📄</button>
+<button id="open-export-modal" class="export">📊</button>
+
+</body>
+</html>
