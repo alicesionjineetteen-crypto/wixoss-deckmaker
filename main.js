@@ -471,3 +471,47 @@ document.getElementById("export-excel-team-btn").onclick = () => {
 document.getElementById("export-excel-solo-btn").onclick = () => {
   exportToExcel("wixoss_ceremony_decklist.xlsx", soloCellMap);
 };
+// =========================
+// 現在編集中のデッキを自動保存・復元
+// =========================
+function saveCurrentDeckToStorage() {
+  localStorage.setItem("currentDeck", JSON.stringify({ lrigDeck, mainBurst, mainNoBurst }));
+}
+
+function loadCurrentDeckFromStorage() {
+  const saved = localStorage.getItem("currentDeck");
+  if (!saved) return;
+
+  try {
+    const data = JSON.parse(saved);
+    lrigDeck = data.lrigDeck || [];
+    mainBurst = data.mainBurst || [];
+    mainNoBurst = data.mainNoBurst || [];
+
+    renderDeckArea("lrig-deck", lrigDeck);
+    renderDeckArea("main-burst", mainBurst);
+    renderDeckArea("main-noburst", mainNoBurst);
+  } catch (e) {
+    console.error("保存されたデッキの読み込みに失敗しました", e);
+  }
+}
+
+// ページを開いた時に、前回編集中だったデッキを復元
+loadCurrentDeckFromStorage();
+
+// =========================
+// デッキを空にする
+// =========================
+document.getElementById("clear-deck-btn").onclick = () => {
+  if (!confirm("デッキ内のカードをすべて空にします。よろしいですか？")) return;
+
+  lrigDeck = [];
+  mainBurst = [];
+  mainNoBurst = [];
+
+  renderDeckArea("lrig-deck", lrigDeck);
+  renderDeckArea("main-burst", mainBurst);
+  renderDeckArea("main-noburst", mainNoBurst);
+
+  saveCurrentDeckToStorage();
+};
