@@ -1,142 +1,103 @@
-/* ===== 全体設定 ===== */
-body {
-  margin: 0;
-  padding: 10px;
-  background-color: #f8f9fa;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  padding-bottom: 100px;
-}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-/* ===== プレイヤー情報 ===== */
-#player-info {
-  background: #ffffff;
-  padding: 12px;
-  border-radius: 10px;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  margin-bottom: 15px;
-}
+<title>WIXOSS Deck Builder</title>
 
-#player-info button {
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: #2196f3;
-  color: white;
-  border: none;
-  border-radius: 6px;
-}
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
 
-/* ===== 検索エリア ===== */
-#search-area {
-  padding: 10px;
-}
+<script src="js/card_info.js" defer></script>
+<script src="main.js" defer></script>
 
-#search-box {
-  width: 100%;
-  padding: 12px;
-  font-size: 18px;
-  border-radius: 8px;
-  border: 1px solid #ccc;
-}
+<link rel="stylesheet" href="style.css" />
+</head>
 
-/* ===== 検索結果（カード一覧） ===== */
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  padding: 10px;
-}
+<body>
 
-.card-img {
-  width: 100%;
-  border-radius: 8px;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.15);
-}
+<div id="player-info">
+  ニックネーム：<span id="nickname"></span><br>
+  使用ルリグ：<span id="center-lrig"></span><br>
+  <button id="open-settings">設定を開く</button>
+</div>
 
-/* ===== デッキエリア ===== */
-.deck-row {
-  display: flex;
-  overflow-x: auto;
-  gap: 10px;
-  padding: 10px 0;
-}
-.deck-row .card-img {
-  width: 100px;
-  flex-shrink: 0;
-}
-.deck-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-  padding: 10px 0;
-}
+<div id="settings-modal" class="modal">
+  <div class="modal-content">
+    <h3>設定</h3>
 
-/* ===== モーダル（設定画面） ===== */
-.modal {
-  display: none;
-  position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 100%;
-  background: rgba(0,0,0,0.5);
-}
+    <label>ニックネーム</label>
+    <input id="nickname-input" type="text">
 
-.modal-content {
-  background: white;
-  margin: 20% auto;
-  padding: 20px;
-  width: 80%;
-  border-radius: 10px;
-}
+    <label>使用ルリグ（カード名）</label>
+    <input id="lrig-input" type="text">
 
-.modal-content input {
-  width: 100%;
-  padding: 10px;
-  margin-top: 8px;
-  margin-bottom: 15px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-}
+    <button id="save-settings">保存</button>
+    <button id="close-settings">閉じる</button>
+  </div>
+</div>
 
-/* ===== 保存ボタン（右下） ===== */
-.fab {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  background: #2196f3;
-  color: white;
-  border-radius: 50%;
-  width: 60px;
-  height: 60px;
-  font-size: 24px;
-  border: none;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-}
+<div id="deck-manager-modal" class="modal">
+  <div class="modal-content">
+    <h3>デッキの保存・呼び出し</h3>
 
-/* ===== 出力ボタン（右上） ===== */
-.export {
-  position: fixed;
-  top: 20px;
-  background: #4caf50;
-  color: white;
-  padding: 10px 15px;
-  border-radius: 8px;
-  border: none;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-}
-#export-btn {
-  right: 130px;
-}
-#open-export-modal {
-  right: 20px;
-}
-/* ===== デッキを空にするボタン（左下） ===== */
-.clear-btn {
-  position: fixed;
-  left: 20px;
-  bottom: 20px;
-  background: #e53935;
-  color: white;
-  padding: 10px 15px;
-  border-radius: 8px;
-  border: none;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-}
+    <input id="deck-save-name" type="text" placeholder="デッキ名を入力">
+    <button id="deck-save-confirm">この内容で保存</button>
+
+    <hr>
+
+    <ul id="deck-list"></ul>
+
+    <button id="close-deck-manager">閉じる</button>
+  </div>
+</div>
+
+<div id="text-output-modal" class="modal">
+  <div class="modal-content">
+    <h3>デッキリスト（テキスト）</h3>
+
+    <textarea id="text-output-area" rows="14" readonly></textarea>
+
+    <button id="copy-text-output">コピー</button>
+    <button id="close-text-output">閉じる</button>
+  </div>
+</div>
+
+<div id="export-modal" class="modal">
+  <div class="modal-content">
+    <h3>Excel出力</h3>
+
+    <button id="export-excel-team-btn">チーム戦用シートで出力</button>
+    <button id="export-excel-solo-btn">個人戦用シートで出力</button>
+
+    <hr>
+
+    <button id="close-export-modal">閉じる</button>
+  </div>
+</div>
+
+<div id="search-area">
+  <input id="search-box" type="text" placeholder="カード名 / No / テキスト検索">
+</div>
+
+<div id="card-list" class="card-grid"></div>
+
+<hr>
+
+<h2>◆ ルリグデッキ</h2>
+<div id="lrig-deck" class="deck-row scroll"></div>
+
+<h2>◆ メインデッキ（ライフバースト有）</h2>
+<div id="main-burst" class="deck-grid"></div>
+
+<h2>◆ メインデッキ（ライフバースト無）</h2>
+<div id="main-noburst" class="deck-grid"></div>
+
+<button id="save-btn" class="fab">💾</button>
+<button id="clear-deck-btn" class="clear-btn">🗑 空にする</button>
+<button id="export-btn" class="export">📄</button>
+<button id="open-export-modal" class="export">📊</button>
+
+</body>
+</html>
