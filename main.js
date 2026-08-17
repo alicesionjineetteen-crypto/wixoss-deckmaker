@@ -280,41 +280,7 @@ function loadDeck(name) {
 
   document.getElementById("deck-manager-modal").style.display = "none";
   alert(`「${name}」を読み込みました`);
-}
-
-document.getElementById("save-btn").onclick = () => {
-  renderDeckList();
-  document.getElementById("deck-manager-modal").style.display = "block";
-};
-
-document.getElementById("deck-save-confirm").onclick = () => {
-  const name = document.getElementById("deck-save-name").value.trim();
-  if (!name) {
-    alert("デッキ名を入力してください");
-    return;
-  }
-
-  const decks = getSavedDecks();
-  decks[name] = {
-    lrigDeck,
-    mainBurst,
-    mainNoBurst,
-    savedAt: new Date().toISOString()
-  };
-  setSavedDecks(decks);
-
-  document.getElementById("deck-save-name").value = "";
-  renderDeckList();
-  alert(`「${name}」として保存しました`);
-};
-
-document.getElementById("close-deck-manager").onclick = () => {
-  document.getElementById("deck-manager-modal").style.display = "none";
-};
-
-document.getElementById("deck-manager-modal").style.display = "none";
-  alert(`「${name}」を読み込みました`);
-  saveCurrentDeckToStorage();
+  saveCurrentDeckToStorage();   // ← ここに追加
 }
 // =========================
 // Excel出力モーダル開閉
