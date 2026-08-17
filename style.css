@@ -68,9 +68,6 @@ body {
   padding: 10px 0;
 }
 
-/* 旧: .deck-row / .deck-row .card-img のルールは
-   ルリグデッキで使わなくなったので削除してOKです（残しても無害です） */
-
 /* ===== 見出しの枚数表示 ===== */
 .count-label {
   font-size: 14px;
