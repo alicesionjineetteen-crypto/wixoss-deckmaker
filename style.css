@@ -114,9 +114,26 @@ body {
 /* ===== 出力ボタン（右上） ===== */
 .export {
   position: fixed;
-  right: 20px;
   top: 20px;
   background: #4caf50;
+  color: white;
+  padding: 10px 15px;
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+#export-btn {
+  right: 130px;
+}
+#open-export-modal {
+  right: 20px;
+}
+/* ===== デッキを空にするボタン（左下） ===== */
+.clear-btn {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  background: #e53935;
   color: white;
   padding: 10px 15px;
   border-radius: 8px;
