@@ -312,6 +312,10 @@ document.getElementById("close-deck-manager").onclick = () => {
   document.getElementById("deck-manager-modal").style.display = "none";
 };
 
+document.getElementById("deck-manager-modal").style.display = "none";
+  alert(`「${name}」を読み込みました`);
+  saveCurrentDeckToStorage();
+}
 // =========================
 // Excel出力モーダル開閉
 // =========================
