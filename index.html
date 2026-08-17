@@ -49,6 +49,16 @@
 
     <ul id="deck-list"></ul>
 
+    <hr>
+
+    <p class="modal-note">保存データはこの端末のブラウザ内にのみ保存されます。キャッシュ削除で消える場合があるため、バックアップをおすすめします。</p>
+
+    <button id="export-deck-data-btn">📤 保存データをエクスポート</button>
+    <label for="import-deck-data-input" class="file-label">📥 保存データをインポート</label>
+    <input id="import-deck-data-input" type="file" accept="application/json" style="display:none">
+
+    <hr>
+
     <button id="close-deck-manager">閉じる</button>
   </div>
 </div>
@@ -85,13 +95,13 @@
 
 <hr>
 
-<h2>◆ ルリグデッキ</h2>
-<div id="lrig-deck" class="deck-row scroll"></div>
+<h2>◆ ルリグデッキ<span id="lrig-count-label" class="count-label"></span></h2>
+<div id="lrig-deck" class="lrig-grid"></div>
 
-<h2>◆ メインデッキ（ライフバースト有）</h2>
+<h2>◆ メインデッキ（ライフバースト有）<span id="burst-count-label" class="count-label"></span></h2>
 <div id="main-burst" class="deck-grid"></div>
 
-<h2>◆ メインデッキ（ライフバースト無）</h2>
+<h2>◆ メインデッキ（ライフバースト無）<span id="noburst-count-label" class="count-label"></span></h2>
 <div id="main-noburst" class="deck-grid"></div>
 
 <button id="save-btn" class="fab">💾</button>
