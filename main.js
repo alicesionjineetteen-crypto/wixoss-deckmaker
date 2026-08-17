@@ -127,6 +127,14 @@ let lrigDeck = [];
 let mainBurst = [];
 let mainNoBurst = [];
 
+// ルリグデッキに入るカード種別
+// ルリグ本体・アシストルリグ（"ルリグ"を含む）に加え、アーツ・ピース（亜種含む）も対象
+const LRIG_DECK_TYPES = ["ルリグ", "アーツ", "ピース"];
+
+function isLrigDeckCard(card) {
+  return LRIG_DECK_TYPES.some(t => card.type.includes(t));
+}
+
 function addToDeck(card) {
   const img = document.createElement("img");
   img.src = card.image;
@@ -134,7 +142,7 @@ function addToDeck(card) {
 
   img.onclick = () => removeCard(card, img);
 
-  if (card.type.includes("ルリグ") || card.type.includes("LRIG")) {
+  if (isLrigDeckCard(card)) {
     lrigDeck.push(card);
     document.getElementById("lrig-deck").appendChild(img);
   } else if (card.burst) {
@@ -144,6 +152,8 @@ function addToDeck(card) {
     mainNoBurst.push(card);
     document.getElementById("main-noburst").appendChild(img);
   }
+
+  saveCurrentDeckToStorage();
 }
 
 // =========================
