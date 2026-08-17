@@ -165,6 +165,8 @@ function removeCard(card, img) {
   lrigDeck = lrigDeck.filter(c => c !== card);
   mainBurst = mainBurst.filter(c => c !== card);
   mainNoBurst = mainNoBurst.filter(c => c !== card);
+
+  saveCurrentDeckToStorage();
 }
 
 // =========================
