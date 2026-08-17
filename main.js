@@ -134,7 +134,26 @@ function isLrigDeckCard(card) {
   return LRIG_DECK_TYPES.some(t => card.type.includes(t));
 }
 
+// 同名カードの枚数をカウント
+function countByName(arr, name) {
+  return arr.filter(c => c.name === name).length;
+}
+
 function addToDeck(card) {
+  // 上限チェック：ルリグデッキは同名1枚まで、メインデッキは同名4枚まで
+  if (isLrigDeckCard(card)) {
+    if (countByName(lrigDeck, card.name) >= 1) {
+      alert(`「${card.name}」はルリグデッキに1枚までしか入れられません`);
+      return;
+    }
+  } else {
+    const total = countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
+    if (total >= 4) {
+      alert(`「${card.name}」はメインデッキに4枚までしか入れられません`);
+      return;
+    }
+  }
+
   const img = document.createElement("img");
   img.src = card.image;
   img.className = "card-img";
@@ -153,19 +172,26 @@ function addToDeck(card) {
   }
 
   saveCurrentDeckToStorage();
+  updateDeckCounts();
 }
 
 // =========================
-// カード削除
+// カード削除（同名カードのうち1枚だけを配列から取り除く）
 // =========================
+function removeOneMatch(arr, card) {
+  const idx = arr.indexOf(card);
+  if (idx !== -1) arr.splice(idx, 1);
+}
+
 function removeCard(card, img) {
   img.remove();
 
-  lrigDeck = lrigDeck.filter(c => c !== card);
-  mainBurst = mainBurst.filter(c => c !== card);
-  mainNoBurst = mainNoBurst.filter(c => c !== card);
+  removeOneMatch(lrigDeck, card);
+  removeOneMatch(mainBurst, card);
+  removeOneMatch(mainNoBurst, card);
 
   saveCurrentDeckToStorage();
+  updateDeckCounts();
 }
 
 // =========================
@@ -181,6 +207,15 @@ function renderDeckArea(elementId, cards) {
     img.onclick = () => removeCard(card, img);
     container.appendChild(img);
   });
+}
+
+// =========================
+// 見出しの枚数表示を更新
+// =========================
+function updateDeckCounts() {
+  document.getElementById("lrig-count-label").textContent = `<${lrigDeck.length}枚>`;
+  document.getElementById("burst-count-label").textContent = `<${mainBurst.length}枚>`;
+  document.getElementById("noburst-count-label").textContent = `<${mainNoBurst.length}枚>`;
 }
 
 // =========================
@@ -214,7 +249,6 @@ document.getElementById("export-btn").onclick = () => {
   textarea.value = text;
   document.getElementById("text-output-modal").style.display = "block";
 
-  // 対応していれば併せてクリップボードにもコピーを試みる（失敗しても無視）
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).catch(() => {});
   }
@@ -315,19 +349,18 @@ function loadDeck(name) {
   renderDeckArea("lrig-deck", lrigDeck);
   renderDeckArea("main-burst", mainBurst);
   renderDeckArea("main-noburst", mainNoBurst);
+  updateDeckCounts();
 
   document.getElementById("deck-manager-modal").style.display = "none";
   alert(`「${name}」を読み込みました`);
   saveCurrentDeckToStorage();
 }
 
-// 💾ボタン → 保存・呼び出しモーダルを開く
 document.getElementById("save-btn").onclick = () => {
   renderDeckList();
   document.getElementById("deck-manager-modal").style.display = "block";
 };
 
-// モーダル内「この内容で保存」ボタン
 document.getElementById("deck-save-confirm").onclick = () => {
   const name = document.getElementById("deck-save-name").value.trim();
   if (!name) {
@@ -351,6 +384,63 @@ document.getElementById("deck-save-confirm").onclick = () => {
 
 document.getElementById("close-deck-manager").onclick = () => {
   document.getElementById("deck-manager-modal").style.display = "none";
+};
+
+// =========================
+// 保存データのエクスポート・インポート
+// =========================
+document.getElementById("export-deck-data-btn").onclick = () => {
+  const data = {
+    savedDecks: getSavedDecks(),
+    currentDeck: { lrigDeck, mainBurst, mainNoBurst },
+    exportedAt: new Date().toISOString()
+  };
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `wixoss_deck_backup_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+document.getElementById("import-deck-data-input").onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+
+      if (data.savedDecks) {
+        setSavedDecks(data.savedDecks);
+      }
+
+      if (data.currentDeck) {
+        lrigDeck = data.currentDeck.lrigDeck || [];
+        mainBurst = data.currentDeck.mainBurst || [];
+        mainNoBurst = data.currentDeck.mainNoBurst || [];
+
+        renderDeckArea("lrig-deck", lrigDeck);
+        renderDeckArea("main-burst", mainBurst);
+        renderDeckArea("main-noburst", mainNoBurst);
+        updateDeckCounts();
+        saveCurrentDeckToStorage();
+      }
+
+      renderDeckList();
+      alert("インポートしました");
+    } catch (err) {
+      console.error(err);
+      alert("インポートに失敗しました。ファイルの形式をご確認ください");
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = "";
 };
 
 // =========================
@@ -395,7 +485,6 @@ function setCellXml(xml, addr, value) {
   return xml;
 }
 
-// 指定セルに「縮小して全体を表示」を適用する（styles.xmlに新しいスタイルを追加して差し替える）
 async function applyShrinkToFit(zip, sheetXml, addresses) {
   const stylesPath = "xl/styles.xml";
   const stylesFile = zip.file(stylesPath);
@@ -482,7 +571,6 @@ async function exportToExcel(templatePath, cellMap) {
       shrinkAddresses.push(noAddr, nameAddr);
     });
 
-    // ライフバースト無は下段（21〜40枚目、専用欄）から優先的に埋める。
     const noBurstForSection3 = mainNoBurst.slice(0, 20);
     const noBurstOverflow = mainNoBurst.slice(20);
 
@@ -529,14 +617,11 @@ async function exportToExcel(templatePath, cellMap) {
       }
     });
 
-    // カードナンバー・名前欄に「縮小して全体を表示」を適用（見切れ対策）
     xml = await applyShrinkToFit(zip, xml, shrinkAddresses);
 
     zip.file(sheetPath, xml);
 
     const out = await zip.generateAsync({ type: "arraybuffer" });
-    // xlsxとして正しいMIMEタイプを明示（省略するとapplication/zip扱いになり、
-    // スマホでzipファイルとして認識されて開けなくなる）
     const blob = new Blob([out], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     });
@@ -556,7 +641,6 @@ async function exportToExcel(templatePath, cellMap) {
   }
 }
 
-// チーム戦用セル配置
 const teamCellMap = {
   nickname: "I9",
   centerLrig: "L4",
@@ -571,7 +655,6 @@ const teamCellMap = {
   s3RightNoCol: "G", s3RightNameCol: "H"
 };
 
-// 個人戦用セル配置
 const soloCellMap = {
   nickname: "H2",
   centerLrig: "H9",
@@ -629,8 +712,8 @@ function loadCurrentDeckFromStorage() {
   }
 }
 
-// ページを開いた時に、前回編集中だったデッキを復元
 loadCurrentDeckFromStorage();
+updateDeckCounts();
 
 // =========================
 // デッキを空にする
@@ -645,6 +728,7 @@ document.getElementById("clear-deck-btn").onclick = () => {
   renderDeckArea("lrig-deck", lrigDeck);
   renderDeckArea("main-burst", mainBurst);
   renderDeckArea("main-noburst", mainNoBurst);
+  updateDeckCounts();
 
   saveCurrentDeckToStorage();
 };
