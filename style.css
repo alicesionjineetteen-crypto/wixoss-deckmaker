@@ -52,6 +52,14 @@ body {
   box-shadow: 0 2px 5px rgba(0,0,0,0.15);
 }
 
+/* ===== メインデッキ（グリッド表示） ===== */
+.deck-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  padding: 10px 0;
+}
+
 /* ===== ルリグデッキ（グリッド表示に変更） ===== */
 .lrig-grid {
   display: grid;
