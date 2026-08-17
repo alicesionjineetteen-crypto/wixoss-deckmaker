@@ -119,18 +119,6 @@ document.getElementById("search-box").oninput = (e) => {
     renderCards(filtered);
   }, 250);
 };
-// =========================
-// 検索処理
-// =========================
-document.getElementById("search-box").oninput = (e) => {
-  const q = e.target.value.toLowerCase();
-  const filtered = allCards.filter(c =>
-    c.name.toLowerCase().includes(q) ||
-    c.id.toLowerCase().includes(q) ||
-    (c.text && c.text.toLowerCase().includes(q))
-  );
-  renderCards(filtered);
-};
 
 // =========================
 // デッキ追加処理
