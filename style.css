@@ -52,24 +52,56 @@ body {
   box-shadow: 0 2px 5px rgba(0,0,0,0.15);
 }
 
-/* ===== デッキエリア ===== */
-.deck-row {
-  display: flex;
-  overflow-x: auto;
-  gap: 10px;
-  padding: 10px 0;
-}
-.deck-row .card-img {
-  width: 100px;
-  flex-shrink: 0;
-}
-.deck-grid {
+/* ===== ルリグデッキ（グリッド表示に変更） ===== */
+.lrig-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 10px;
   padding: 10px 0;
 }
 
+/* 旧: .deck-row / .deck-row .card-img のルールは
+   ルリグデッキで使わなくなったので削除してOKです（残しても無害です） */
+
+/* ===== 見出しの枚数表示 ===== */
+.count-label {
+  font-size: 14px;
+  color: #666;
+  font-weight: normal;
+  margin-left: 4px;
+}
+
+/* ===== スマホでの見出し折り返し対策 ===== */
+@media (max-width: 420px) {
+  h2 {
+    font-size: 16px;
+  }
+  .deck-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .lrig-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+/* ===== インポートボタン（ファイル選択のラベル） ===== */
+.file-label {
+  display: inline-block;
+  padding: 10px 15px;
+  background: #2196f3;
+  color: white;
+  border-radius: 6px;
+  text-align: center;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+/* ===== 保存・呼び出しモーダルの注意書き ===== */
+.modal-note {
+  font-size: 13px;
+  color: #888;
+  margin: 10px 0;
+}
 /* ===== モーダル（設定画面） ===== */
 .modal {
   display: none;
