@@ -1,3 +1,8 @@
+/* ===== ボックスサイズ定義 ===== */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 /* ===== 全体設定 ===== */
 body {
   margin: 0;
