@@ -596,6 +596,23 @@ function renderDeckList() {
     loadBtn.textContent = "読み込む";
     loadBtn.onclick = () => loadDeck(name);
 
+    const overwriteBtn = document.createElement("button");
+    overwriteBtn.textContent = "上書き";
+    overwriteBtn.onclick = () => {
+      if (confirm(`「${name}」に上書き保存します。よろしいですか？`)) {
+        const d = getSavedDecks();
+        d[name] = {
+          lrigDeck,
+          mainBurst,
+          mainNoBurst,
+          savedAt: new Date().toISOString()
+        };
+        setSavedDecks(d);
+        alert(`「${name}」を上書き保存しました`);
+        renderDeckList();
+      }
+    };
+
     const delBtn = document.createElement("button");
     delBtn.textContent = "削除";
     delBtn.onclick = () => {
@@ -609,6 +626,7 @@ function renderDeckList() {
 
     li.appendChild(label);
     li.appendChild(loadBtn);
+    li.appendChild(overwriteBtn);
     li.appendChild(delBtn);
     listEl.appendChild(li);
   });
