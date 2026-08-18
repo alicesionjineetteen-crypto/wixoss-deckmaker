@@ -41,6 +41,9 @@ document.getElementById("center-lrig").innerText =
 // 設定モーダル開閉
 // =========================
 document.getElementById("open-settings").onclick = () => {
+  document.getElementById("nickname-input").value = localStorage.getItem("playerName") || "";
+  document.getElementById("lrig-input").value = localStorage.getItem("centerLrig") || "";
+  document.getElementById("selector-id-input").value = localStorage.getItem("selectorId") || "";
   document.getElementById("settings-modal").style.display = "block";
 };
 
@@ -54,9 +57,11 @@ document.getElementById("close-settings").onclick = () => {
 document.getElementById("save-settings").onclick = () => {
   const name = document.getElementById("nickname-input").value;
   const lrig = document.getElementById("lrig-input").value;
+  const selectorId = document.getElementById("selector-id-input").value;
 
   localStorage.setItem("playerName", name);
   localStorage.setItem("centerLrig", lrig);
+  localStorage.setItem("selectorId", selectorId);
 
   document.getElementById("nickname").innerText = name;
   document.getElementById("center-lrig").innerText = lrig;
@@ -139,6 +144,103 @@ function countByName(arr, name) {
   return arr.filter(c => c.name === name).length;
 }
 
+// =========================
+// デッキ内カードのタップ（1枚削除）／長押し（枚数指定で追加）
+// =========================
+const LONG_PRESS_MS = 500;
+
+function attachDeckCardEvents(img, card, allowLongPress) {
+  if (!allowLongPress) {
+    img.onclick = () => removeCard(card, img);
+    return;
+  }
+
+  let timer = null;
+  let longPressed = false;
+
+  const startPress = () => {
+    longPressed = false;
+    timer = setTimeout(() => {
+      longPressed = true;
+      promptAddMore(card);
+    }, LONG_PRESS_MS);
+  };
+  const cancelPress = () => {
+    clearTimeout(timer);
+  };
+  const endPress = () => {
+    clearTimeout(timer);
+    if (!longPressed) {
+      removeCard(card, img);
+    }
+  };
+
+  img.addEventListener("touchstart", startPress, { passive: true });
+  img.addEventListener("touchend", endPress);
+  img.addEventListener("touchmove", cancelPress);
+  img.addEventListener("touchcancel", cancelPress);
+  img.addEventListener("mousedown", startPress);
+  img.addEventListener("mouseup", endPress);
+  img.addEventListener("mouseleave", cancelPress);
+}
+
+function promptAddMore(card) {
+  const currentTotal = countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
+  const remaining = 4 - currentTotal;
+
+  if (remaining <= 0) {
+    alert(`「${card.name}」はすでに上限（4枚）まで入っています`);
+    return;
+  }
+
+  const input = prompt(
+    `「${card.name}」を追加する枚数を入力してください\n（現在${currentTotal}枚 / あと${remaining}枚まで追加可）`,
+    "1"
+  );
+  if (input === null) return;
+
+  const qty = parseInt(input, 10);
+  if (!Number.isInteger(qty) || qty <= 0) {
+    alert("正しい枚数を入力してください");
+    return;
+  }
+
+  addQuantityToDeck(card, qty);
+}
+
+function addQuantityToDeck(card, qty) {
+  const currentTotal = countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
+  const available = 4 - currentTotal;
+
+  if (available <= 0) {
+    alert(`「${card.name}」はすでに上限（4枚）まで入っています`);
+    return;
+  }
+
+  const actualQty = Math.min(qty, available);
+  if (actualQty < qty) {
+    alert(`上限（4枚）の関係で${actualQty}枚だけ追加しました`);
+  }
+
+  for (let i = 0; i < actualQty; i++) {
+    const img = document.createElement("img");
+    img.src = card.image;
+    img.className = "card-img";
+    attachDeckCardEvents(img, card, true);
+
+    if (card.burst) {
+      mainBurst.push(card);
+      document.getElementById("main-burst").appendChild(img);
+    } else {
+      mainNoBurst.push(card);
+      document.getElementById("main-noburst").appendChild(img);
+    }
+  }
+
+  saveCurrentDeckToStorage();
+  updateDeckCounts();
+}
+
 function addToDeck(card) {
   // 上限チェック：ルリグデッキは同名1枚まで、メインデッキは同名4枚まで
   if (isLrigDeckCard(card)) {
@@ -158,15 +260,16 @@ function addToDeck(card) {
   img.src = card.image;
   img.className = "card-img";
 
-  img.onclick = () => removeCard(card, img);
-
   if (isLrigDeckCard(card)) {
+    attachDeckCardEvents(img, card, false);
     lrigDeck.push(card);
     document.getElementById("lrig-deck").appendChild(img);
   } else if (card.burst) {
+    attachDeckCardEvents(img, card, true);
     mainBurst.push(card);
     document.getElementById("main-burst").appendChild(img);
   } else {
+    attachDeckCardEvents(img, card, true);
     mainNoBurst.push(card);
     document.getElementById("main-noburst").appendChild(img);
   }
@@ -200,11 +303,13 @@ function removeCard(card, img) {
 function renderDeckArea(elementId, cards) {
   const container = document.getElementById(elementId);
   container.innerHTML = "";
+  const allowLongPress = elementId !== "lrig-deck";
+
   cards.forEach(card => {
     const img = document.createElement("img");
     img.src = card.image;
     img.className = "card-img";
-    img.onclick = () => removeCard(card, img);
+    attachDeckCardEvents(img, card, allowLongPress);
     container.appendChild(img);
   });
 }
@@ -216,6 +321,31 @@ function updateDeckCounts() {
   document.getElementById("lrig-count-label").textContent = `<${lrigDeck.length}枚>`;
   document.getElementById("burst-count-label").textContent = `<${mainBurst.length}枚>`;
   document.getElementById("noburst-count-label").textContent = `<${mainNoBurst.length}枚>`;
+}
+
+// =========================
+// 出力用セクション組み立て（Excel出力で利用）
+// =========================
+function buildDeckSections() {
+  const lrigLeft = lrigDeck.slice(0, 6).map(c => ({ card: c, checked: false }));
+  const lrigRight = lrigDeck.slice(6, 12).map(c => ({ card: c, checked: false }));
+
+  // ライフバースト無は下段（21〜40枚目、専用欄）から優先的に埋める
+  const noBurstForSection3 = mainNoBurst.slice(0, 20);
+  const noBurstOverflow = mainNoBurst.slice(20);
+
+  const section2Cards = [
+    ...mainBurst.map(c => ({ card: c, checked: false })),
+    ...noBurstOverflow.map(c => ({ card: c, checked: true }))
+  ].slice(0, 20);
+
+  const section2Left = section2Cards.slice(0, 10);
+  const section2Right = section2Cards.slice(10, 20);
+
+  const section3Left = noBurstForSection3.slice(0, 10).map(c => ({ card: c, checked: false }));
+  const section3Right = noBurstForSection3.slice(10, 20).map(c => ({ card: c, checked: false }));
+
+  return { lrigLeft, lrigRight, section2Left, section2Right, section3Left, section3Right };
 }
 
 // =========================
@@ -485,7 +615,8 @@ function setCellXml(xml, addr, value) {
   return xml;
 }
 
-async function applyShrinkToFit(zip, sheetXml, addresses) {
+// 指定セルに「共通フォント・中央揃え・縮小して全体を表示」を適用する
+async function applyUniformCellStyle(zip, sheetXml, addresses, referenceFontId) {
   const stylesPath = "xl/styles.xml";
   const stylesFile = zip.file(stylesPath);
   if (!stylesFile) return sheetXml;
@@ -498,19 +629,26 @@ async function applyShrinkToFit(zip, sheetXml, addresses) {
   const xfList = cellXfsMatch[1].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g) || [];
   const styleCache = {};
 
-  function getShrinkIndex(origIndex) {
+  function getUniformIndex(origIndex) {
     if (styleCache[origIndex] !== undefined) return styleCache[origIndex];
     const orig = xfList[origIndex];
     if (!orig) return origIndex;
 
-    let newXf;
-    if (orig.includes("<alignment")) {
-      newXf = orig.replace(/\s*wrapText="1"/g, "");
-      newXf = newXf.replace("<alignment ", '<alignment shrinkToFit="1" ');
-    } else if (orig.endsWith("/>")) {
-      newXf = orig.slice(0, -2) + ' applyAlignment="1"><alignment shrinkToFit="1"/></xf>';
+    let newXf = orig.replace(/fontId="\d+"/, `fontId="${referenceFontId}"`);
+    if (!/fontId="/.test(newXf)) {
+      newXf = newXf.replace("<xf ", `<xf fontId="${referenceFontId}" `);
+    }
+    if (!/applyFont="1"/.test(newXf)) {
+      newXf = newXf.replace(/\/?>/, (m) => (m === "/>" ? ' applyFont="1"/>' : ' applyFont="1">'));
+    }
+
+    if (newXf.includes("<alignment")) {
+      newXf = newXf.replace(/\s*wrapText="1"/g, "");
+      newXf = newXf.replace(/<alignment[^>]*\/>/, '<alignment horizontal="center" vertical="center" shrinkToFit="1"/>');
+    } else if (newXf.endsWith("/>")) {
+      newXf = newXf.slice(0, -2) + ' applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>';
     } else {
-      newXf = orig.replace("</xf>", '<alignment shrinkToFit="1"/></xf>');
+      newXf = newXf.replace("</xf>", '<alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>');
     }
 
     xfList.push(newXf);
@@ -523,7 +661,7 @@ async function applyShrinkToFit(zip, sheetXml, addresses) {
     const m = sheetXml.match(new RegExp(`<c r="${addr}"[^>]*\\bs="(\\d+)"`));
     if (!m) return;
     const origIndex = parseInt(m[1], 10);
-    const newIndex = getShrinkIndex(origIndex);
+    const newIndex = getUniformIndex(origIndex);
     sheetXml = sheetXml.replace(
       new RegExp(`(<c r="${addr}"[^>]*\\bs=")\\d+(")`),
       `$1${newIndex}$2`
@@ -535,6 +673,17 @@ async function applyShrinkToFit(zip, sheetXml, addresses) {
   zip.file(stylesPath, stylesXml);
 
   return sheetXml;
+}
+
+// 指定範囲のセルがまだマージされていなければマージする（テンプレート側の結合漏れ対策）
+function ensureMerged(sheetXml, ref) {
+  const m = sheetXml.match(/<mergeCells count="(\d+)">([\s\S]*?)<\/mergeCells>/);
+  if (!m) return sheetXml;
+  if (m[2].includes(`ref="${ref}"`)) return sheetXml;
+
+  const newCount = parseInt(m[1], 10) + 1;
+  const newBlock = `<mergeCells count="${newCount}">${m[2]}<mergeCell ref="${ref}"/></mergeCells>`;
+  return sheetXml.replace(m[0], newBlock);
 }
 
 async function exportToExcel(templatePath, cellMap) {
@@ -551,10 +700,17 @@ async function exportToExcel(templatePath, cellMap) {
     let xml = await sheetFile.async("string");
     const shrinkAddresses = [];
 
+    if (cellMap.mergeFix) {
+      xml = ensureMerged(xml, cellMap.mergeFix);
+    }
+
     xml = setCellXml(xml, cellMap.nickname, localStorage.getItem("playerName") || "");
     xml = setCellXml(xml, cellMap.centerLrig, localStorage.getItem("centerLrig") || "");
+    xml = setCellXml(xml, cellMap.selectorId, localStorage.getItem("selectorId") || "");
 
-    lrigDeck.slice(0, 6).forEach((c, i) => {
+    const { lrigLeft, lrigRight, section2Left, section2Right, section3Left, section3Right } = buildDeckSections();
+
+    lrigLeft.forEach(({ card: c }, i) => {
       const row = cellMap.lrigRows[i];
       const noAddr = `${cellMap.lrigLeftNoCol}${row}`;
       const nameAddr = `${cellMap.lrigLeftNameCol}${row}`;
@@ -562,7 +718,7 @@ async function exportToExcel(templatePath, cellMap) {
       xml = setCellXml(xml, nameAddr, c.name);
       shrinkAddresses.push(noAddr, nameAddr);
     });
-    lrigDeck.slice(6, 12).forEach((c, i) => {
+    lrigRight.forEach(({ card: c }, i) => {
       const row = cellMap.lrigRows[i];
       const noAddr = `${cellMap.lrigRightNoCol}${row}`;
       const nameAddr = `${cellMap.lrigRightNameCol}${row}`;
@@ -571,53 +727,44 @@ async function exportToExcel(templatePath, cellMap) {
       shrinkAddresses.push(noAddr, nameAddr);
     });
 
-    const noBurstForSection3 = mainNoBurst.slice(0, 20);
-    const noBurstOverflow = mainNoBurst.slice(20);
-
-    const section2Cards = [
-      ...mainBurst.map(c => ({ card: c, checked: false })),
-      ...noBurstOverflow.map(c => ({ card: c, checked: true }))
-    ].slice(0, 20);
-
-    section2Cards.forEach(({ card: c, checked }, i) => {
-      if (i < 10) {
-        const row = cellMap.section2Rows[i];
-        const noAddr = `${cellMap.s2LeftNoCol}${row}`;
-        const nameAddr = `${cellMap.s2LeftNameCol}${row}`;
-        xml = setCellXml(xml, noAddr, c.id);
-        xml = setCellXml(xml, nameAddr, c.name);
-        if (checked) xml = setCellXml(xml, `${cellMap.s2LeftCheckCol}${row}`, "レ");
-        shrinkAddresses.push(noAddr, nameAddr);
-      } else {
-        const row = cellMap.section2Rows[i - 10];
-        const noAddr = `${cellMap.s2RightNoCol}${row}`;
-        const nameAddr = `${cellMap.s2RightNameCol}${row}`;
-        xml = setCellXml(xml, noAddr, c.id);
-        xml = setCellXml(xml, nameAddr, c.name);
-        if (checked) xml = setCellXml(xml, `${cellMap.s2RightCheckCol}${row}`, "レ");
-        shrinkAddresses.push(noAddr, nameAddr);
-      }
+    section2Left.forEach(({ card: c, checked }, i) => {
+      const row = cellMap.section2Rows[i];
+      const noAddr = `${cellMap.s2LeftNoCol}${row}`;
+      const nameAddr = `${cellMap.s2LeftNameCol}${row}`;
+      xml = setCellXml(xml, noAddr, c.id);
+      xml = setCellXml(xml, nameAddr, c.name);
+      if (checked) xml = setCellXml(xml, `${cellMap.s2LeftCheckCol}${row}`, "レ");
+      shrinkAddresses.push(noAddr, nameAddr);
+    });
+    section2Right.forEach(({ card: c, checked }, i) => {
+      const row = cellMap.section2Rows[i];
+      const noAddr = `${cellMap.s2RightNoCol}${row}`;
+      const nameAddr = `${cellMap.s2RightNameCol}${row}`;
+      xml = setCellXml(xml, noAddr, c.id);
+      xml = setCellXml(xml, nameAddr, c.name);
+      if (checked) xml = setCellXml(xml, `${cellMap.s2RightCheckCol}${row}`, "レ");
+      shrinkAddresses.push(noAddr, nameAddr);
     });
 
-    noBurstForSection3.forEach((c, i) => {
-      if (i < 10) {
-        const row = cellMap.section3Rows[i];
-        const noAddr = `${cellMap.s3LeftNoCol}${row}`;
-        const nameAddr = `${cellMap.s3LeftNameCol}${row}`;
-        xml = setCellXml(xml, noAddr, c.id);
-        xml = setCellXml(xml, nameAddr, c.name);
-        shrinkAddresses.push(noAddr, nameAddr);
-      } else {
-        const row = cellMap.section3Rows[i - 10];
-        const noAddr = `${cellMap.s3RightNoCol}${row}`;
-        const nameAddr = `${cellMap.s3RightNameCol}${row}`;
-        xml = setCellXml(xml, noAddr, c.id);
-        xml = setCellXml(xml, nameAddr, c.name);
-        shrinkAddresses.push(noAddr, nameAddr);
-      }
+    section3Left.forEach(({ card: c }, i) => {
+      const row = cellMap.section3Rows[i];
+      const noAddr = `${cellMap.s3LeftNoCol}${row}`;
+      const nameAddr = `${cellMap.s3LeftNameCol}${row}`;
+      xml = setCellXml(xml, noAddr, c.id);
+      xml = setCellXml(xml, nameAddr, c.name);
+      shrinkAddresses.push(noAddr, nameAddr);
+    });
+    section3Right.forEach(({ card: c }, i) => {
+      const row = cellMap.section3Rows[i];
+      const noAddr = `${cellMap.s3RightNoCol}${row}`;
+      const nameAddr = `${cellMap.s3RightNameCol}${row}`;
+      xml = setCellXml(xml, noAddr, c.id);
+      xml = setCellXml(xml, nameAddr, c.name);
+      shrinkAddresses.push(noAddr, nameAddr);
     });
 
-    xml = await applyShrinkToFit(zip, xml, shrinkAddresses);
+    // カードナンバー・名前欄のフォント・揃えを統一（見切れ・不揃い対策）
+    xml = await applyUniformCellStyle(zip, xml, shrinkAddresses, cellMap.fontId);
 
     zip.file(sheetPath, xml);
 
@@ -641,9 +788,12 @@ async function exportToExcel(templatePath, cellMap) {
   }
 }
 
+// チーム戦用セル配置
 const teamCellMap = {
   nickname: "I9",
   centerLrig: "L4",
+  selectorId: "I11",
+  fontId: 15,
   lrigRows: [16, 17, 18, 19, 20, 21],
   lrigLeftNoCol: "C", lrigLeftNameCol: "D",
   lrigRightNoCol: "G", lrigRightNameCol: "H",
@@ -655,9 +805,13 @@ const teamCellMap = {
   s3RightNoCol: "G", s3RightNameCol: "H"
 };
 
+// 個人戦用セル配置
 const soloCellMap = {
   nickname: "H2",
   centerLrig: "H9",
+  selectorId: "H4",
+  mergeFix: "H4:I4",   // テンプレート側でセレクターID欄が結合されていないための補修
+  fontId: 11,
   lrigRows: [14, 15, 16, 17, 18, 19],
   lrigLeftNoCol: "B", lrigLeftNameCol: "C",
   lrigRightNoCol: "F", lrigRightNameCol: "G",
