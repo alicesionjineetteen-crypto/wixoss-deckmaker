@@ -33,6 +33,9 @@
     <label>使用ルリグ（カード名）</label>
     <input id="lrig-input" type="text">
 
+    <label>セレクターID</label>
+    <input id="selector-id-input" type="text">
+
     <button id="save-settings">保存</button>
     <button id="close-settings">閉じる</button>
   </div>
@@ -87,8 +90,64 @@
   </div>
 </div>
 
+<div id="card-preview-modal" class="modal">
+  <div class="modal-content preview-content">
+    <img id="card-preview-img" src="" alt="カード拡大画像">
+    <button id="close-card-preview">閉じる</button>
+  </div>
+</div>
+
 <div id="search-area">
   <input id="search-box" type="text" placeholder="カード名 / No / テキスト検索">
+
+  <button id="toggle-advanced-search">詳細検索 ▼</button>
+
+  <div id="advanced-search-panel" style="display:none;">
+    <label>タイプ</label>
+    <select id="filter-type">
+      <option value="">指定なし</option>
+      <option value="ルリグ">ルリグ</option>
+      <option value="アシストルリグ">アシストルリグ</option>
+      <option value="シグニ">シグニ</option>
+      <option value="アーツ">アーツ</option>
+      <option value="スペル">スペル</option>
+      <option value="ピース">ピース</option>
+    </select>
+
+    <label>色</label>
+    <select id="filter-color">
+      <option value="">指定なし</option>
+      <option value="白">白</option>
+      <option value="青">青</option>
+      <option value="赤">赤</option>
+      <option value="黒">黒</option>
+      <option value="緑">緑</option>
+      <option value="無">無</option>
+    </select>
+
+    <label>クラス（部分一致）</label>
+    <input id="filter-class" type="text" placeholder="例: 精霊">
+
+    <label>タイミング</label>
+    <select id="filter-timing">
+      <option value="">指定なし</option>
+      <option value="メインフェイズ">メインフェイズ</option>
+      <option value="アタックフェイズ">アタックフェイズ</option>
+      <option value="スペルカットイン">スペルカットイン</option>
+    </select>
+
+    <label>ライフバースト</label>
+    <select id="filter-burst">
+      <option value="">指定なし</option>
+      <option value="yes">有</option>
+      <option value="no">無</option>
+    </select>
+
+    <label>テキスト（部分一致）</label>
+    <input id="filter-text" type="text" placeholder="例: ドロー">
+
+    <button id="clear-advanced-search">条件をクリア</button>
+  </div>
 </div>
 
 <div id="card-list" class="card-grid"></div>
