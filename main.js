@@ -80,7 +80,7 @@ document.getElementById("save-settings").onclick = () => {
 // 検索・詳細検索
 // =========================
 const MAX_RESULTS = 60;
-const LONG_PRESS_MS = 300;
+const LONG_PRESS_MS = 200;
 const MOVE_THRESHOLD = 8; // px
 
 function renderCards(cards) {
