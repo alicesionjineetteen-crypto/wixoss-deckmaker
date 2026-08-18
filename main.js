@@ -126,7 +126,7 @@ document.getElementById("search-box").oninput = (e) => {
 };
 
 // =========================
-// デッキ追加処理
+// デッキ本体
 // =========================
 let lrigDeck = [];
 let mainBurst = [];
@@ -145,43 +145,80 @@ function countByName(arr, name) {
 }
 
 // =========================
-// デッキ内カードのタップ（1枚削除）／長押し（枚数指定で追加）
+// 並び替え＋再描画（デッキが変化するたびに呼ぶ、唯一の更新経路）
 // =========================
-const LONG_PRESS_MS = 500;
+function sortDecks() {
+  const byName = (a, b) => a.name.localeCompare(b.name, "ja");
+  lrigDeck.sort(byName);
+  mainBurst.sort(byName);
+  mainNoBurst.sort(byName);
+}
+
+function refreshDeckDisplay() {
+  sortDecks();
+  renderDeckArea("lrig-deck", lrigDeck);
+  renderDeckArea("main-burst", mainBurst);
+  renderDeckArea("main-noburst", mainNoBurst);
+  updateDeckCounts();
+  saveCurrentDeckToStorage();
+}
+
+// =========================
+// デッキ内カードのタップ（1枚削除）／長押し（枚数指定で追加）
+// Pointer Eventsでタッチ・マウスを一本化（二重発火・誤スクロール削除対策）
+// =========================
+const LONG_PRESS_MS = 300;
+const MOVE_THRESHOLD = 10; // px。これ以上動いたらスクロールとみなしてキャンセル
 
 function attachDeckCardEvents(img, card, allowLongPress) {
   if (!allowLongPress) {
-    img.onclick = () => removeCard(card, img);
+    img.onclick = () => removeCard(card);
     return;
   }
 
   let timer = null;
   let longPressed = false;
+  let moved = false;
+  let startX = 0;
+  let startY = 0;
 
-  const startPress = () => {
+  const startPress = (e) => {
     longPressed = false;
+    moved = false;
+    startX = e.clientX;
+    startY = e.clientY;
     timer = setTimeout(() => {
       longPressed = true;
       promptAddMore(card);
     }, LONG_PRESS_MS);
   };
-  const cancelPress = () => {
-    clearTimeout(timer);
-  };
-  const endPress = () => {
-    clearTimeout(timer);
-    if (!longPressed) {
-      removeCard(card, img);
+
+  const checkMove = (e) => {
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (Math.sqrt(dx * dx + dy * dy) > MOVE_THRESHOLD) {
+      moved = true;
+      clearTimeout(timer);
     }
   };
 
-  img.addEventListener("touchstart", startPress, { passive: true });
-  img.addEventListener("touchend", endPress);
-  img.addEventListener("touchmove", cancelPress);
-  img.addEventListener("touchcancel", cancelPress);
-  img.addEventListener("mousedown", startPress);
-  img.addEventListener("mouseup", endPress);
-  img.addEventListener("mouseleave", cancelPress);
+  const cancelPress = () => {
+    clearTimeout(timer);
+    moved = true;
+  };
+
+  const endPress = () => {
+    clearTimeout(timer);
+    if (!longPressed && !moved) {
+      removeCard(card);
+    }
+  };
+
+  img.addEventListener("pointerdown", startPress);
+  img.addEventListener("pointermove", checkMove);
+  img.addEventListener("pointerup", endPress);
+  img.addEventListener("pointercancel", cancelPress);
+  img.addEventListener("pointerleave", cancelPress);
 }
 
 function promptAddMore(card) {
@@ -223,22 +260,14 @@ function addQuantityToDeck(card, qty) {
   }
 
   for (let i = 0; i < actualQty; i++) {
-    const img = document.createElement("img");
-    img.src = card.image;
-    img.className = "card-img";
-    attachDeckCardEvents(img, card, true);
-
     if (card.burst) {
       mainBurst.push(card);
-      document.getElementById("main-burst").appendChild(img);
     } else {
       mainNoBurst.push(card);
-      document.getElementById("main-noburst").appendChild(img);
     }
   }
 
-  saveCurrentDeckToStorage();
-  updateDeckCounts();
+  refreshDeckDisplay();
 }
 
 function addToDeck(card) {
@@ -256,26 +285,15 @@ function addToDeck(card) {
     }
   }
 
-  const img = document.createElement("img");
-  img.src = card.image;
-  img.className = "card-img";
-
   if (isLrigDeckCard(card)) {
-    attachDeckCardEvents(img, card, false);
     lrigDeck.push(card);
-    document.getElementById("lrig-deck").appendChild(img);
   } else if (card.burst) {
-    attachDeckCardEvents(img, card, true);
     mainBurst.push(card);
-    document.getElementById("main-burst").appendChild(img);
   } else {
-    attachDeckCardEvents(img, card, true);
     mainNoBurst.push(card);
-    document.getElementById("main-noburst").appendChild(img);
   }
 
-  saveCurrentDeckToStorage();
-  updateDeckCounts();
+  refreshDeckDisplay();
 }
 
 // =========================
@@ -286,15 +304,12 @@ function removeOneMatch(arr, card) {
   if (idx !== -1) arr.splice(idx, 1);
 }
 
-function removeCard(card, img) {
-  img.remove();
-
+function removeCard(card) {
   removeOneMatch(lrigDeck, card);
   removeOneMatch(mainBurst, card);
   removeOneMatch(mainNoBurst, card);
 
-  saveCurrentDeckToStorage();
-  updateDeckCounts();
+  refreshDeckDisplay();
 }
 
 // =========================
@@ -476,14 +491,10 @@ function loadDeck(name) {
   mainBurst = deck.mainBurst || [];
   mainNoBurst = deck.mainNoBurst || [];
 
-  renderDeckArea("lrig-deck", lrigDeck);
-  renderDeckArea("main-burst", mainBurst);
-  renderDeckArea("main-noburst", mainNoBurst);
-  updateDeckCounts();
+  refreshDeckDisplay();
 
   document.getElementById("deck-manager-modal").style.display = "none";
   alert(`「${name}」を読み込みました`);
-  saveCurrentDeckToStorage();
 }
 
 document.getElementById("save-btn").onclick = () => {
@@ -554,12 +565,7 @@ document.getElementById("import-deck-data-input").onchange = (e) => {
         lrigDeck = data.currentDeck.lrigDeck || [];
         mainBurst = data.currentDeck.mainBurst || [];
         mainNoBurst = data.currentDeck.mainNoBurst || [];
-
-        renderDeckArea("lrig-deck", lrigDeck);
-        renderDeckArea("main-burst", mainBurst);
-        renderDeckArea("main-noburst", mainNoBurst);
-        updateDeckCounts();
-        saveCurrentDeckToStorage();
+        refreshDeckDisplay();
       }
 
       renderDeckList();
@@ -858,6 +864,7 @@ function loadCurrentDeckFromStorage() {
     mainBurst = data.mainBurst || [];
     mainNoBurst = data.mainNoBurst || [];
 
+    sortDecks();
     renderDeckArea("lrig-deck", lrigDeck);
     renderDeckArea("main-burst", mainBurst);
     renderDeckArea("main-noburst", mainNoBurst);
@@ -879,10 +886,5 @@ document.getElementById("clear-deck-btn").onclick = () => {
   mainBurst = [];
   mainNoBurst = [];
 
-  renderDeckArea("lrig-deck", lrigDeck);
-  renderDeckArea("main-burst", mainBurst);
-  renderDeckArea("main-noburst", mainNoBurst);
-  updateDeckCounts();
-
-  saveCurrentDeckToStorage();
+  refreshDeckDisplay();
 };
