@@ -172,6 +172,7 @@ body {
 #open-export-modal {
   right: 20px;
 }
+
 .stats-content {
   max-height: 85vh;
   overflow-y: auto;
