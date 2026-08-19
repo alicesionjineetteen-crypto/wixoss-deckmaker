@@ -90,7 +90,16 @@
   </div>
 </div>
 
- <div id="stats-modal" class="modal">
+<style>
+  @media (max-width: 480px) {
+    #stats-modal .stats-content h3 {
+      font-size: 0.9rem;
+      white-space: nowrap;
+    }
+  }
+</style>
+
+<div id="stats-modal" class="modal">
   <div class="modal-content stats-content">
     <h3>デッキ内カード分布（メインデッキ）</h3>
     <div id="stats-container"></div>
