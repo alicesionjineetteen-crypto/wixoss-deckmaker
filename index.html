@@ -102,7 +102,10 @@
 
   <button id="toggle-advanced-search">詳細検索 ▼</button>
 
-  <div id="advanced-search-panel" style="display:none;">
+   <div id="advanced-search-panel" style="display:none;">
+    <label>カード名（部分一致）</label>
+    <input id="filter-name" type="text" placeholder="例: エターナル">
+
     <label>タイプ</label>
     <select id="filter-type">
       <option value="">指定なし</option>
@@ -112,6 +115,16 @@
       <option value="アーツ">アーツ</option>
       <option value="スペル">スペル</option>
       <option value="ピース">ピース</option>
+    </select>
+
+    <label>レベル</label>
+    <select id="filter-level">
+      <option value="">指定なし</option>
+      <option value="0">0</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
     </select>
 
     <label>色</label>
