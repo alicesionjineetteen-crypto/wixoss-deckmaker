@@ -170,22 +170,26 @@ renderCards([]);
 // 詳細検索の条件を取得
 function getAdvancedFilters() {
   return {
+    name: document.getElementById("filter-name").value.trim().toLowerCase(),
     type: document.getElementById("filter-type").value,
+    level: document.getElementById("filter-level").value,
     color: document.getElementById("filter-color").value,
     cls: document.getElementById("filter-class").value.trim().toLowerCase(),
     timing: document.getElementById("filter-timing").value,
-    burst: document.getElementById("filter-burst").value, // "", "yes", "no"
+    burst: document.getElementById("filter-burst").value,
     text: document.getElementById("filter-text").value.trim().toLowerCase()
   };
 }
 
 function hasActiveAdvancedFilters(f) {
-  return !!(f.type || f.color || f.cls || f.timing || f.burst || f.text);
+  return !!(f.name || f.type || f.level || f.color || f.cls || f.timing || f.burst || f.text);
 }
 
 // カードが詳細検索条件（AND）に合致するか
 function matchesAdvancedFilters(card, f) {
+  if (f.name && !card.name.toLowerCase().includes(f.name)) return false;
   if (f.type && !card.type.includes(f.type)) return false;
+  if (f.level && card.level !== f.level) return false;
   if (f.color && !card.color.includes(f.color)) return false;
   if (f.cls && !(card.class && card.class.toLowerCase().includes(f.cls))) return false;
   if (f.timing && !(card.timing && card.timing.includes(f.timing))) return false;
@@ -216,6 +220,10 @@ function runSearch() {
   });
 
   renderCards(filtered);
+
+  if (filtered.length === 0) {
+    alert("検索結果は0件です。");
+  }
 }
 
 // =========================
@@ -239,11 +247,16 @@ document.getElementById("toggle-advanced-search").onclick = () => {
 };
 
 document.getElementById("filter-type").onchange = runSearch;
+document.getElementById("filter-level").onchange = runSearch;
 document.getElementById("filter-color").onchange = runSearch;
 document.getElementById("filter-timing").onchange = runSearch;
 document.getElementById("filter-burst").onchange = runSearch;
 
 let advancedTextTimer = null;
+document.getElementById("filter-name").oninput = () => {
+  clearTimeout(advancedTextTimer);
+  advancedTextTimer = setTimeout(runSearch, 250);
+};
 document.getElementById("filter-class").oninput = () => {
   clearTimeout(advancedTextTimer);
   advancedTextTimer = setTimeout(runSearch, 250);
@@ -254,7 +267,9 @@ document.getElementById("filter-text").oninput = () => {
 };
 
 document.getElementById("clear-advanced-search").onclick = () => {
+  document.getElementById("filter-name").value = "";
   document.getElementById("filter-type").value = "";
+  document.getElementById("filter-level").value = "";
   document.getElementById("filter-color").value = "";
   document.getElementById("filter-class").value = "";
   document.getElementById("filter-timing").value = "";
