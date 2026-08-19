@@ -174,7 +174,8 @@ body {
 }
 
 .stats-content {
-  max-height: 85vh;
+  margin: 5vh auto;
+  max-height: 90vh;
   overflow-y: auto;
 }
 .stats-summary {
