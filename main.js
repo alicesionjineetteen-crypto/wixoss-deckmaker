@@ -1056,3 +1056,154 @@ document.getElementById("clear-deck-btn").onclick = () => {
 
   refreshDeckDisplay();
 };
+// =========================
+// デッキ内カード分布（円グラフ）
+// =========================
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// 「サーバント #」はエナゾーンで全色を持つ特殊カードのため、
+// 色の分布では「無」ではなく専用カテゴリ（金色）として扱う。
+// レベルの分布からは除外し、その旨をメモとして表示する。
+const SERVANT_CARD_NAME = "サーバント #";
+
+function buildColorDistribution() {
+  const cards = [...mainBurst, ...mainNoBurst];
+  const buckets = {};
+  let servantCount = 0;
+
+  cards.forEach(c => {
+    if (c.name === SERVANT_CARD_NAME) {
+      servantCount++;
+      return;
+    }
+    const key = c.color || "無";
+    buckets[key] = (buckets[key] || 0) + 1;
+  });
+
+  const COLOR_HEX = {
+    "白": "#f5f5f0",
+    "青": "#2196f3",
+    "赤": "#e53935",
+    "黒": "#333333",
+    "緑": "#43a047",
+    "無": "#9e9e9e"
+  };
+  const MULTI_COLOR = "#8e6fce"; // 複数色の組み合わせ（例:白黒）用の中間色
+
+  const data = Object.keys(buckets).map(key => ({
+    label: key,
+    value: buckets[key],
+    color: COLOR_HEX[key] || MULTI_COLOR
+  }));
+
+  if (servantCount > 0) {
+    // 金色でひと目で「特殊カテゴリ」と分かるようにする
+    data.push({ label: SERVANT_CARD_NAME, value: servantCount, color: "#d4af37" });
+  }
+
+  return data;
+}
+
+function buildLevelDistribution() {
+  const cards = [...mainBurst, ...mainNoBurst].filter(c => c.name !== SERVANT_CARD_NAME);
+  const buckets = {};
+
+  cards.forEach(c => {
+    const key = c.level === "" ? "レベルなし" : c.level;
+    buckets[key] = (buckets[key] || 0) + 1;
+  });
+
+  const LEVEL_PALETTE = {
+    "0": "#b0bec5",
+    "1": "#80cbc4",
+    "2": "#ffb74d",
+    "3": "#ba68c8",
+    "4": "#f06292",
+    "レベルなし": "#cfd8dc"
+  };
+
+  const order = ["0", "1", "2", "3", "4", "レベルなし"];
+  return order
+    .filter(k => buckets[k])
+    .map(k => ({
+      label: k === "レベルなし" ? k : `Lv${k}`,
+      value: buckets[k],
+      color: LEVEL_PALETTE[k]
+    }));
+}
+
+function renderPieChart(data, title, note) {
+  const size = 200;
+  const radius = 80;
+  const cx = size / 2;
+  const cy = size / 2;
+
+  const nonZero = data.filter(d => d.value > 0);
+  const total = nonZero.reduce((s, d) => s + d.value, 0);
+
+  let svgContent = "";
+
+  if (total === 0) {
+    svgContent = `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="#eee" stroke="#ccc"/>`;
+  } else if (nonZero.length === 1) {
+    svgContent = `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${nonZero[0].color}" stroke="#999"/>`;
+  } else {
+    let startAngle = -Math.PI / 2;
+    nonZero.forEach(d => {
+      const angle = (d.value / total) * Math.PI * 2;
+      const endAngle = startAngle + angle;
+      const x1 = cx + radius * Math.cos(startAngle);
+      const y1 = cy + radius * Math.sin(startAngle);
+      const x2 = cx + radius * Math.cos(endAngle);
+      const y2 = cy + radius * Math.sin(endAngle);
+      const largeArc = angle > Math.PI ? 1 : 0;
+      svgContent += `<path d="M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius} ${radius} 0 ${largeArc} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z" fill="${d.color}" stroke="#999" stroke-width="1"/>`;
+      startAngle = endAngle;
+    });
+  }
+
+  const legendHtml = nonZero
+    .map(d => `<div class="stats-legend-item"><span class="stats-swatch" style="background:${d.color}"></span>${escapeHtml(d.label)}：${d.value}枚</div>`)
+    .join("");
+
+  return `
+    <div class="stats-chart-block">
+      <h4>${escapeHtml(title)}</h4>
+      <svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${svgContent}</svg>
+      <div class="stats-legend">${legendHtml || "（該当カードなし）"}</div>
+      ${note ? `<p class="stats-note">${escapeHtml(note)}</p>` : ""}
+    </div>
+  `;
+}
+
+function renderDeckStats() {
+  const mainTotal = mainBurst.length + mainNoBurst.length;
+  const servantCount = [...mainBurst, ...mainNoBurst].filter(c => c.name === SERVANT_CARD_NAME).length;
+
+  const colorData = buildColorDistribution();
+  const levelData = buildLevelDistribution();
+
+  const container = document.getElementById("stats-container");
+  container.innerHTML =
+    `<p class="stats-summary">メインデッキ合計：${mainTotal}枚</p>` +
+    renderPieChart(colorData, "色の分布", null) +
+    renderPieChart(
+      levelData,
+      "レベルの分布",
+      servantCount > 0 ? `「${SERVANT_CARD_NAME}」${servantCount}枚を除いて集計しています` : null
+    );
+}
+
+document.getElementById("stats-btn").onclick = () => {
+  renderDeckStats();
+  document.getElementById("stats-modal").style.display = "block";
+};
+
+document.getElementById("close-stats").onclick = () => {
+  document.getElementById("stats-modal").style.display = "none";
+};
