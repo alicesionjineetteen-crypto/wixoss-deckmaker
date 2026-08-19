@@ -83,7 +83,7 @@ const MAX_RESULTS = 60;
 const LONG_PRESS_MS = 200;
 const MOVE_THRESHOLD = 8; // px
 
-function renderCards(cards) {
+function renderCards(cards, searched) {
   const list = document.getElementById("card-list");
   list.innerHTML = "";
 
@@ -104,6 +104,11 @@ function renderCards(cards) {
     const notice = document.createElement("p");
     notice.className = "search-notice";
     notice.textContent = `${cards.length}件ヒット（先頭${MAX_RESULTS}件を表示中。キーワードを追加して絞り込んでください）`;
+    list.appendChild(notice);
+  } else if (searched && cards.length === 0) {
+    const notice = document.createElement("p");
+    notice.className = "search-notice";
+    notice.textContent = "検索結果は0件です。";
     list.appendChild(notice);
   }
 }
@@ -219,11 +224,7 @@ function runSearch() {
     return matchesAdvancedFilters(c, filters);
   });
 
-  renderCards(filtered);
-
-  if (filtered.length === 0) {
-    alert("検索結果は0件です。");
-  }
+  renderCards(filtered, true);
 }
 
 // =========================
