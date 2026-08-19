@@ -152,7 +152,7 @@ body {
   box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
 
-/* ===== 出力ボタン（右上） ===== */
+/* ===== 出力・分布ボタン（右上） ===== */
 .export {
   position: fixed;
   top: 20px;
@@ -163,11 +163,57 @@ body {
   border: none;
   box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
-#export-btn {
+#stats-btn {
   right: 130px;
+}
+#export-btn {
+  right: 75px;
 }
 #open-export-modal {
   right: 20px;
+}
+.stats-content {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.stats-summary {
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+.stats-chart-block {
+  margin-bottom: 20px;
+  text-align: center;
+}
+.stats-chart-block h4 {
+  margin-bottom: 8px;
+}
+.stats-chart-block svg {
+  display: block;
+  margin: 0 auto 10px;
+}
+.stats-legend {
+  text-align: left;
+  display: inline-block;
+}
+.stats-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.stats-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid #999;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.stats-note {
+  font-size: 12px;
+  color: #888;
+  margin-top: 6px;
 }
 /* ===== デッキを空にするボタン（左下） ===== */
 .clear-btn {
