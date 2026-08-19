@@ -297,3 +297,9 @@ body {
   border-radius: 8px;
   box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
+
+/* 分布モーダルのテキストを一行に収まるように変更 */
+.stats-content h3 {
+  font-size: clamp(13px, 4.3vw, 18px);
+  white-space: nowrap;
+}
