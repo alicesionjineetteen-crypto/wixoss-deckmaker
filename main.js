@@ -700,6 +700,13 @@ document.getElementById("close-deck-manager").onclick = () => {
 // 保存データのエクスポート・インポート
 // =========================
 document.getElementById("export-deck-data-btn").onclick = () => {
+  const defaultName = `wixoss_deck_backup_${new Date().toISOString().slice(0, 10)}`;
+  const inputName = prompt("エクスポートするファイル名を入力してください（拡張子は不要です）", defaultName);
+  if (inputName === null) return; // キャンセル時は何もしない
+
+  // ファイル名に使えない記号を安全な文字に置き換える
+  const safeName = (inputName.trim() || defaultName).replace(/[\\/:*?"<>|]/g, "_");
+
   const data = {
     savedDecks: getSavedDecks(),
     currentDeck: { lrigDeck, mainBurst, mainNoBurst },
@@ -710,12 +717,12 @@ document.getElementById("export-deck-data-btn").onclick = () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `wixoss_deck_backup_${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `${safeName}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-};
+};;
 
 document.getElementById("import-deck-data-input").onchange = (e) => {
   const file = e.target.files[0];
