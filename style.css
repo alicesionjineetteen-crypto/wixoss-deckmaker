@@ -93,16 +93,53 @@ body {
   }
 }
 
-/* ===== インポートボタン（ファイル選択のラベル） ===== */
-.file-label {
-  display: inline-block;
+/* ===== エクスポート・インポートボタン（共通見た目） ===== */
+.data-io-btn {
+  display: block;
+  width: 100%;
   padding: 10px 15px;
   background: #2196f3;
   color: white;
+  border: none;
   border-radius: 6px;
   text-align: center;
   cursor: pointer;
   margin-top: 8px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+/* ===== デッキ保存・呼び出しモーダル ===== */
+.deck-modal-content {
+  width: 92%;
+  max-width: 480px;
+}
+#deck-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+#deck-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+#deck-list li span {
+  flex: 1 1 100%;
+  font-weight: bold;
+  word-break: break-all;
+}
+#deck-list li button {
+  flex: 1;
+  padding: 8px 4px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: none;
+  background: #eee;
+  white-space: nowrap;
 }
 
 /* ===== 保存・呼び出しモーダルの注意書き ===== */
