@@ -113,6 +113,9 @@ body {
 .deck-modal-content {
   width: 92%;
   max-width: 480px;
+  margin: 5vh auto;
+  max-height: 90vh;
+  overflow-y: auto;
 }
 #deck-list {
   list-style: none;
