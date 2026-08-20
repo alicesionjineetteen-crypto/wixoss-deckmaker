@@ -869,6 +869,13 @@ function ensureMerged(sheetXml, ref) {
 }
 
 async function exportToExcel(templatePath, cellMap) {
+  const defaultName = `deck_${localStorage.getItem("playerName") || "unnamed"}`;
+  const inputName = prompt("出力するファイル名を入力してください（拡張子は不要です）", defaultName);
+  if (inputName === null) return; // キャンセル時は何もしない
+
+  // ファイル名に使えない記号を安全な文字に置き換える
+  const safeName = (inputName.trim() || defaultName).replace(/[\\/:*?"<>|]/g, "_");
+
   try {
     const res = await fetch(templatePath);
     if (!res.ok) throw new Error("テンプレートファイルが見つかりません: " + templatePath);
@@ -957,7 +964,7 @@ async function exportToExcel(templatePath, cellMap) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `deck_${localStorage.getItem("playerName") || "unnamed"}.xlsx`;
+    a.download = `${safeName}.xlsx`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
