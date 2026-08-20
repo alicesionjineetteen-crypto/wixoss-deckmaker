@@ -166,6 +166,7 @@ body {
   padding: 20px;
   width: 80%;
   border-radius: 10px;
+  overscroll-behavior: contain;
 }
 
 .modal-content input {
