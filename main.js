@@ -1,4 +1,34 @@
 // =========================
+// モーダル開閉共通処理
+// 開いている間は背景を完全に固定し、スクロールが後ろのページに
+// 漏れて引っかかるのを防ぐ
+// =========================
+let bodyScrollLockY = 0;
+let modalOpenCount = 0;
+
+function openModal(id) {
+  if (modalOpenCount === 0) {
+    bodyScrollLockY = window.scrollY;
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${bodyScrollLockY}px`;
+    document.body.style.width = "100%";
+  }
+  modalOpenCount++;
+  document.getElementById(id).style.display = "block";
+}
+
+function closeModal(id) {
+  document.getElementById(id).style.display = "none";
+  modalOpenCount = Math.max(0, modalOpenCount - 1);
+  if (modalOpenCount === 0) {
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.width = "";
+    window.scrollTo(0, bodyScrollLockY);
+  }
+}
+
+// =========================
 // カードデータ読み込み
 // =========================
 
@@ -50,11 +80,11 @@ document.getElementById("open-settings").onclick = () => {
   if (lrigInput) lrigInput.value = localStorage.getItem("centerLrig") || "";
   if (selectorInput) selectorInput.value = localStorage.getItem("selectorId") || "";
 
-  document.getElementById("settings-modal").style.display = "block";
+ openModal("settings-modal");
 };
 
 document.getElementById("close-settings").onclick = () => {
-  document.getElementById("settings-modal").style.display = "none";
+  closeModal("settings-modal");
 };
 
 // =========================
@@ -162,11 +192,11 @@ function attachSearchCardEvents(img, card) {
 
 function showCardPreview(card) {
   document.getElementById("card-preview-img").src = card.image;
-  document.getElementById("card-preview-modal").style.display = "block";
+  openModal("card-preview-modal");
 }
 
 document.getElementById("close-card-preview").onclick = () => {
-  document.getElementById("card-preview-modal").style.display = "none";
+  closeModal("card-preview-modal");
 };
 
 // 初期表示は空。検索するまでカードを描画しない
@@ -543,7 +573,7 @@ document.getElementById("export-btn").onclick = () => {
 
   const textarea = document.getElementById("text-output-area");
   textarea.value = text;
-  document.getElementById("text-output-modal").style.display = "block";
+  openModal("text-output-modal");
 
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).catch(() => {});
@@ -551,7 +581,7 @@ document.getElementById("export-btn").onclick = () => {
 };
 
 document.getElementById("close-text-output").onclick = () => {
-  document.getElementById("text-output-modal").style.display = "none";
+  closeModal("text-output-modal");
 };
 
 document.getElementById("copy-text-output").onclick = () => {
@@ -662,13 +692,13 @@ function loadDeck(name) {
 
   refreshDeckDisplay();
 
-  document.getElementById("deck-manager-modal").style.display = "none";
+  closeModal("deck-manager-modal");
   alert(`「${name}」を読み込みました`);
 }
 
 document.getElementById("save-btn").onclick = () => {
   renderDeckList();
-  document.getElementById("deck-manager-modal").style.display = "block";
+  openModal("deck-manager-modal");
 };
 
 document.getElementById("deck-save-confirm").onclick = () => {
@@ -693,7 +723,7 @@ document.getElementById("deck-save-confirm").onclick = () => {
 };
 
 document.getElementById("close-deck-manager").onclick = () => {
-  document.getElementById("deck-manager-modal").style.display = "none";
+  closeModal("deck-manager-modal");
 };
 
 // =========================
@@ -759,11 +789,11 @@ document.getElementById("import-deck-data-input").onchange = (e) => {
 // Excel出力モーダル開閉
 // =========================
 document.getElementById("open-export-modal").onclick = () => {
-  document.getElementById("export-modal").style.display = "block";
+  openModal("export-modal");
 };
 
 document.getElementById("close-export-modal").onclick = () => {
-  document.getElementById("export-modal").style.display = "none";
+  closeModal("export-modal");
 };
 
 // =========================
@@ -970,7 +1000,7 @@ async function exportToExcel(templatePath, cellMap) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    document.getElementById("export-modal").style.display = "none";
+    closeModal("export-modal");
   } catch (err) {
     console.error(err);
     alert("Excel出力に失敗しました。コンソールを確認してください。");
@@ -1216,9 +1246,9 @@ function renderDeckStats() {
 
 document.getElementById("stats-btn").onclick = () => {
   renderDeckStats();
-  document.getElementById("stats-modal").style.display = "block";
+  openModal("stats-modal");
 };
 
 document.getElementById("close-stats").onclick = () => {
-  document.getElementById("stats-modal").style.display = "none";
+  closeModal("stats-modal");
 };
