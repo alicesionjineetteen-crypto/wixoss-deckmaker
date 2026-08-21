@@ -331,11 +331,13 @@ body {
   z-index: 1000;
 }
 
-/* 分布モーダルの閉じるボタンを画面下部左に固定 */
+/* 分布モーダルの閉じるボタンを画面下部中央に固定 */
 #close-stats {
+ #close-stats {
   position: fixed;
-  left: 50px;
-  bottom: 20px;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
   z-index: 1001;
   padding: 12px 24px;
   background: #2196f3;
@@ -349,4 +351,11 @@ body {
 .stats-content h3 {
   font-size: clamp(13px, 4.3vw, 18px);
   white-space: nowrap;
+}
+
+.fab {
+  bottom: calc(20px + env(safe-area-inset-bottom));
+}
+.clear-btn {
+  bottom: calc(20px + env(safe-area-inset-bottom));
 }
