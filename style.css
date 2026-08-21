@@ -333,7 +333,6 @@ body {
 
 /* 分布モーダルの閉じるボタンを画面下部中央に固定 */
 #close-stats {
- #close-stats {
   position: fixed;
   left: 50%;
   bottom: calc(20px + env(safe-area-inset-bottom));
