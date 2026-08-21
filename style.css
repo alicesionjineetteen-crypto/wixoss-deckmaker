@@ -114,8 +114,11 @@ body {
   width: 92%;
   max-width: 480px;
   margin: 5vh auto;
+  margin: 5dvh auto;
   max-height: 90vh;
+  max-height: 90dvh;
   overflow-y: auto;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
 }
 #deck-list {
   list-style: none;
@@ -204,7 +207,7 @@ body {
   border: none;
   box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
-#stats-btn {
+#s-btn {
   right: 130px;
 }
 #export-btn {
@@ -216,8 +219,11 @@ body {
 
 .stats-content {
   margin: 5vh auto;
+  margin: 5dvh auto;
   max-height: 90vh;
+  max-height: 90dvh;
   overflow-y: auto;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
 }
 .stats-summary {
   font-weight: bold;
