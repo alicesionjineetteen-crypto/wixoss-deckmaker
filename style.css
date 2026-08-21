@@ -147,7 +147,11 @@ body {
   background: #eee;
   white-space: nowrap;
 }
-
+#close-deck-manager {
+  display: block;
+  margin: 20px auto 0;
+  padding: 10px 20px;
+}
 /* ===== 保存・呼び出しモーダルの注意書き ===== */
 .modal-note {
   font-size: 13px;
