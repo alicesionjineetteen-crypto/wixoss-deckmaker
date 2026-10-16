@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WIXOSS 一人回し</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:8px;font:14px/1.4 sans-serif;background:#1c2431;color:#eee}
+a{color:#8cf}
+button,select,input{font:inherit;padding:6px 10px;margin:2px;border-radius:6px;border:1px solid #556;background:#2d3a52;color:#fff}
+button:active{background:#46618f}
+.bar{display:flex;flex-wrap:wrap;align-items:center}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+.zone{background:#263043;border-radius:8px;padding:4px 6px;margin:4px 0;flex:1;min-width:110px}
+.zone h4{margin:0 0 4px;font-size:12px;cursor:pointer;color:#9bd}
+.cards{display:flex;gap:4px;overflow-x:auto;min-height:92px;padding:2px}
+.card{width:62px;height:88px;border-radius:4px;flex:none;object-fit:cover;background:#445}
+.card.dn{transform:rotate(90deg);margin:0 13px}
+.card.sel{outline:3px solid #fc0}
+.back{display:flex;align-items:center;justify-content:center;background:#5a3b7a;color:#cbb;font-size:12px}
+#st{font-weight:bold;margin:4px}
+#lg{font-size:12px;color:#aab;min-height:48px;padding:4px}
+.modal{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:9}
+.modal[hidden]{display:none}
+.box{background:#223;border-radius:10px;padding:12px;max-width:96vw;max-height:92vh;overflow:auto;text-align:center}
+#mimg{width:200px;max-width:60vw;border-radius:6px}
+#vlist{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+</style>
+</head>
+<body>
+<div class="bar">
+  <a href="index.html">◀ デッキ作成</a>
+  <select id="sel"></select>
+  <button id="start">ゲーム開始</button>
+  <button id="undo">↩ 戻す</button>
+</div>
+<div id="st"></div>
+<div id="mullbar" class="bar" hidden>
+  マリガン：戻したい手札をタップ
+  <button id="mull-ok">選んだ札を戻して引き直す</button>
+  <button id="mull-keep">この手札で始める</button>
+</div>
+<div id="board"></div>
+<div class="bar">
+  <button id="draw">ドロー</button>
+  <button id="shuf">シャッフル</button>
+  <button id="enec">エナチャージ</button>
+  <button id="crush">ライフクラッシュ</button>
+  <button id="chk">チェック→エナ</button>
+  <button id="peek">デッキ上を見る</button>
+  <button id="next">次のフェイズ ▶</button>
+</div>
+<div id="lg"></div>
+
+<div id="menu" class="modal" hidden><div class="box">
+  <img id="mimg" alt=""><div id="mname"></div><div id="mbtns"></div>
+  <button id="mclose">閉じる</button>
+</div></div>
+<div id="view" class="modal" hidden><div class="box">
+  <div id="vtitle"></div>
+  <span id="vnw" hidden>上から<input id="vn" type="number" value="5" min="1" style="width:60px">枚 <button id="vgo">表示</button></span>
+  <div id="vlist"></div>
+  <button id="vclose">閉じる</button>
+</div></div>
+
+<script>
+const Z={deck:'デッキ',hand:'手札',ener:'エナゾーン',trash:'トラッシュ',life:'ライフクロス',check:'チェックゾーン',lrig:'ルリグ',lrigdeck:'ルリグデッキ',lrigtrash:'ルリグトラッシュ',s0:'シグニ左',s1:'シグニ中',s2:'シグニ右'};
+const PH=['アップ','ドロー','エナ','グロウ','メイン','アタック','エンド'];
+const $=id=>document.getElementById(id);
+let S=null,U=[],uid=0,sel=new Set(),mull=false,V=null,VN=5;
+
+const J=k=>{try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e){return null}};
+function decks(){const o={},c=J('currentDeck'),s=J('savedDecks')||{};if(c)o['(編集中のデッキ)']=c;Object.keys(s).forEach(k=>o[k]=s[k]);return o}
+function save(){try{localStorage.setItem('ptState',JSON.stringify({S,uid,mull}))}catch(e){}}
+function log(t){S.log=S.log||[];S.log.push(t);if(S.log.length>40)S.log.shift()}
+function snap(){U.push(JSON.stringify(S));if(U.length>40)U.shift()}
+function inst(c){return{u:++uid,c,d:0,f:0}}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}}
+function draw(n){let k=0;while(k<n&&S.deck.length){S.hand.push(S.deck.shift());k++}return k}
+function find(u){for(const k in Z){const i=S[k].findIndex(x=>x.u===u);if(i>=0)return[k,i]}}
+
+function start(){
+  const D=decks()[$('sel').value];
+  if(!D){alert('デッキがありません。デッキ作成ページで作成・保存してください');return}
+  const main=[...(D.mainBurst||[]),...(D.mainNoBurst||[])];
+  S={turn:1,ph:0,log:[]};for(const k in Z)S[k]=[];
+  S.deck=main.map(inst);S.lrigdeck=(D.lrigDeck||[]).map(inst);
+  shuffle(S.deck);draw(5);U=[];sel.clear();mull=true;
+  log('ゲーム開始（メインデッキ'+main.length+'枚'+(main.length!==40?'・40枚ではありません':'')+'）');
+  save();render();
+}
+function endMull(redraw){
+  if(redraw&&sel.size){
+    const n=sel.size;
+    S.hand=S.hand.filter(x=>{if(sel.has(x.u)){S.deck.push(x);return false}return true});
+    shuffle(S.deck);draw(n);log('マリガン'+n+'枚');
+  }
+  for(let i=0;i<7;i++){const x=S.deck.shift();if(x){x.f=1;S.life.push(x)}}
+  const i0=S.lrigdeck.findIndex(x=>x.c.type==='ルリグ'&&String(x.c.level)==='0');
+  if(i0>=0)S.lrig.push(S.lrigdeck.splice(i0,1)[0]);else alert('ルリグデッキにLv0のルリグがありません');
+  mull=false;sel.clear();log('ライフクロス7枚・ルリグ配置');save();render();
+}
+function move(u,to,pos){
+  snap();const[k,i]=find(u),x=S[k].splice(i,1)[0];
+  x.d=0;x.f=(to==='life')?1:0;
+  if(pos==='top')S[to].unshift(x);else S[to].push(x);
+  log(x.c.name+'：'+Z[k]+'→'+Z[to]+(pos==='top'?'(上)':''));
+  save();render();
+}
+function next(){
+  snap();S.ph++;
+  if(S.ph>6){S.ph=0;S.turn++}
+  if(S.ph===0){['ener','lrig','s0','s1','s2'].forEach(k=>S[k].forEach(x=>x.d=0));log('ターン'+S.turn+' アップ：全てアップ')}
+  if(S.ph===1){const n=draw(S.turn===1?1:2);log('ドロー：'+n+'枚')}
+  if(S.ph===6&&S.hand.length>6)alert('手札が'+S.hand.length+'枚です。6枚になるまでトラッシュへ送ってください');
+  save();render();
+}
+function crush(){
+  if(!S.life.length){alert('ライフクロスがありません');return}
+  snap();const x=S.life.shift();x.f=0;S.check.push(x);
+  log('クラッシュ：'+x.c.name+(x.c.burst?'（ライフバースト有）':''));save();render();
+}
+
+function cel(x,hid){
+  let e;
+  if(hid){e=document.createElement('div');e.className='card back';e.textContent='裏'}
+  else{e=document.createElement('img');e.className='card';e.src=x.c.image;e.loading='lazy'}
+  if(x.d)e.classList.add('dn');
+  if(sel.has(x.u))e.classList.add('sel');
+  e.onclick=ev=>{
+    ev.stopPropagation();
+    if(mull&&S.hand.includes(x)){sel.has(x.u)?sel.delete(x.u):sel.add(x.u);render();return}
+    if(mull)return;
+    menu(x.u);
+  };
+  return e;
+}
+function zoneEl(k,all){
+  const z=document.createElement('div');z.className='zone';
+  const h=document.createElement('h4');h.textContent=Z[k]+'（'+S[k].length+'）';h.onclick=()=>view(k);z.appendChild(h);
+  const c=document.createElement('div');c.className='cards';
+  const a=S[k],top=(k==='deck'||k==='life')?a.slice(0,1):a.slice(-1);
+  (all?a:top).forEach(x=>c.appendChild(cel(x,k==='deck'||x.f)));
+  z.appendChild(c);return z;
+}
+function row(ks,all){const r=document.createElement('div');r.className='row';ks.forEach(k=>r.appendChild(zoneEl(k,all&&all.includes(k))));return r}
+function render(){
+  const b=$('board');b.innerHTML='';
+  if(!S){$('st').textContent='デッキを選んで「ゲーム開始」を押してください';return}
+  $('st').textContent='ターン'+S.turn+' ／ '+PH[S.ph]+'フェイズ';
+  $('mullbar').hidden=!mull;
+  b.appendChild(row(['life','deck','trash','check'],['check']));
+  b.appendChild(row(['s0','s1','s2']));
+  b.appendChild(row(['lrig','ener'],['ener']));
+  b.appendChild(row(['lrigdeck','lrigtrash']));
+  b.appendChild(row(['hand'],['hand']));
+  $('lg').innerHTML=(S.log||[]).slice(-5).reverse().join('<br>');
+  if(V)view(V,VN,true);
+}
+
+const TO=[['hand'],['ener'],['trash'],['s0'],['s1'],['s2'],['lrig'],['lrigdeck'],['lrigtrash'],['deck','top'],['deck'],['life','top'],['check']];
+function menu(u){
+  const[k,i]=find(u),x=S[k][i];
+  $('mimg').src=x.c.image;$('mname').textContent=x.c.name+'（'+Z[k]+'）';
+  const b=$('mbtns');b.innerHTML='';
+  const add=(t,f)=>{const e=document.createElement('button');e.textContent=t;e.onclick=()=>{f();$('menu').hidden=true};b.appendChild(e)};
+  add(x.d?'アップにする':'ダウンにする',()=>{snap();x.d=x.d?0:1;save();render()});
+  add(x.f?'表にする':'裏にする',()=>{snap();x.f=x.f?0:1;save();render()});
+  TO.forEach(([t,p])=>{if(t!==k||p)add(Z[t]+(t==='deck'?(p?'の上':'の下'):t==='life'?'の上':'')+'へ',()=>move(u,t,p))});
+  $('menu').hidden=false;
+}
+function view(k,n,keep){
+  V=k;if(n)VN=n;
+  $('vtitle').textContent=Z[k]+'（'+S[k].length+'枚）'+(k==='deck'?'　※上から順':'');
+  $('vnw').hidden=k!=='deck';$('vn').value=VN;
+  const l=$('vlist');l.innerHTML='';
+  (k==='deck'?S.deck.slice(0,VN):S[k]).forEach(x=>{const e=cel(x,false);e.onclick=ev=>{ev.stopPropagation();menu(x.u)};l.appendChild(e)});
+  $('view').hidden=false;
+}
+
+$('start').onclick=()=>{if(!S||confirm('現在のゲームを破棄して最初からやり直しますか？'))start()};
+$('undo').onclick=()=>{if(mull||!U.length)return;S=JSON.parse(U.pop());save();render()};
+$('mull-ok').onclick=()=>endMull(true);
+$('mull-keep').onclick=()=>endMull(false);
+$('draw').onclick=()=>{if(!S||mull)return;snap();draw(1);log('ドロー');save();render()};
+$('shuf').onclick=()=>{if(!S||mull)return;snap();shuffle(S.deck);log('デッキをシャッフル');save();render()};
+$('enec').onclick=()=>{if(!S||mull||!S.deck.length)return;snap();S.ener.push(S.deck.shift());log('エナチャージ：'+S.ener[S.ener.length-1].c.name);save();render()};
+$('crush').onclick=()=>{if(S&&!mull)crush()};
+$('chk').onclick=()=>{if(!S||mull||!S.check.length)return;snap();S.ener.push(...S.check.splice(0).map(x=>(x.d=0,x)));log('チェックゾーン→エナゾーン');save();render()};
+$('peek').onclick=()=>{if(S&&!mull)view('deck',VN)};
+$('next').onclick=()=>{if(S&&!mull)next()};
+$('vgo').onclick=()=>view('deck',Math.max(1,+$('vn').value||5));
+$('vclose').onclick=()=>{V=null;$('view').hidden=true};
+$('mclose').onclick=()=>{$('menu').hidden=true};
+
+(function init(){
+  const d=decks(),s=$('sel');
+  Object.keys(d).forEach(k=>{const o=document.createElement('option');o.value=o.textContent=k;s.appendChild(o)});
+  const p=J('ptState');
+  if(p&&p.S){S=p.S;uid=p.uid||0;mull=!!p.mull}
+  render();
+})();
+</script>
+</body>
+</html>
