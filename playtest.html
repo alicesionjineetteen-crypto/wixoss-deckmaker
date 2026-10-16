@@ -6,6 +6,7 @@
 <title>WIXOSS 一人回し</title>
 <style>
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;padding:8px;font:14px/1.4 sans-serif;background:#1c2431;color:#eee}
 a{color:#8cf}
 button,select,input{font:inherit;padding:6px 10px;margin:2px;border-radius:6px;border:1px solid #556;background:#2d3a52;color:#fff}
@@ -91,14 +92,17 @@ function start(){
   save();render();
 }
 function endMull(redraw){
+  if(!S||!mull)return;
   if(redraw&&sel.size){
     const n=sel.size;
     S.hand=S.hand.filter(x=>{if(sel.has(x.u)){S.deck.push(x);return false}return true});
     shuffle(S.deck);draw(n);log('マリガン'+n+'枚');
   }
   for(let i=0;i<7;i++){const x=S.deck.shift();if(x){x.f=1;S.life.push(x)}}
-  const i0=S.lrigdeck.findIndex(x=>x.c.type==='ルリグ'&&String(x.c.level)==='0');
-  if(i0>=0)S.lrig.push(S.lrigdeck.splice(i0,1)[0]);else alert('ルリグデッキにLv0のルリグがありません');
+  if(!S.lrig.length){
+    const i0=S.lrigdeck.findIndex(x=>x.c.type==='ルリグ'&&String(x.c.level)==='0');
+    if(i0>=0)S.lrig.push(S.lrigdeck.splice(i0,1)[0]);else alert('ルリグデッキにLv0のルリグがありません');
+  }
   mull=false;sel.clear();log('ライフクロス7枚・ルリグ配置');save();render();
 }
 function move(u,to,pos){
