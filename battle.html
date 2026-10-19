@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WIXOSS 対戦（ルール自動処理）</title>
+<style>
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;padding:8px;font:14px/1.4 sans-serif;background:#1c2431;color:#eee}
+a{color:#8cf}
+button,select,input{font:inherit;padding:5px 9px;margin:2px;border-radius:6px;border:1px solid #556;background:#2d3a52;color:#fff}
+button:active{background:#46618f}
+.bar{display:flex;flex-wrap:wrap;align-items:center}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+.pb{border:2px solid transparent;border-radius:10px;padding:2px;margin:6px 0}
+.pb.cur{border-color:#fc0}
+.zone{background:#263043;border-radius:8px;padding:4px 6px;margin:3px 0;flex:1;min-width:110px}
+.zone h4{margin:0 0 4px;font-size:12px;cursor:pointer;color:#9bd}
+.cards{display:flex;gap:4px;overflow-x:auto;min-height:92px;padding:2px}
+.card{width:62px;height:88px;border-radius:4px;flex:none;object-fit:cover;background:#445}
+.card.dn{transform:rotate(90deg);margin:0 13px}
+.card.sel{outline:3px solid #fc0}
+.back{display:flex;align-items:center;justify-content:center;background:#5a3b7a;color:#cbb;font-size:12px}
+#st{font-weight:bold;margin:4px}
+#lg{font-size:12px;color:#aab;min-height:48px;padding:4px}
+.modal{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:9}
+.box{background:#223;border-radius:10px;padding:12px;max-width:96vw;max-height:92vh;overflow:auto;text-align:center}
+#mimg{width:200px;max-width:60vw;border-radius:6px}
+#vlist{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+</style>
+</head>
+<body>
+<div class="bar">
+  <a href="index.html">◀ デッキ作成</a>
+  <a href="playtest.html" style="margin-left:8px">一人回し</a>
+</div>
+<div class="bar">
+  自分<select id="sel0"></select>
+  相手<select id="sel1"></select>
+  先攻<select id="fs"><option value="0">自分</option><option value="1">相手</option></select>
+  <button id="start">対戦開始</button>
+  <button id="undo">↩ 戻す</button>
+</div>
+<div class="bar">
+  <button id="next">次のフェイズ ▶</button>
+  <label><input type="checkbox" id="hide" checked>相手の手札を隠す</label>
+  <label><input type="checkbox" id="rule" checked>ルール自動処理</label>
+</div>
+<div id="st"></div>
+<div id="mullbar" class="bar" hidden>
+  <span id="mtxt"></span>
+  <button id="mull-ok">選んだ札を戻して引き直す</button>
+  <button id="mull-keep">この手札で始める</button>
+</div>
+<div id="board"></div>
+<div id="lg"></div>
+
+<div id="menu" class="modal" hidden><div class="box">
+  <img id="mimg" alt=""><div id="mname"></div><div id="mtext" style="font-size:12px;text-align:left;max-width:320px;margin:4px auto"></div><div id="mbtns"></div>
+  <button id="mclose">閉じる</button>
+</div></div>
+<div id="view" class="modal" hidden><div class="box">
+  <div id="vtitle"></div>
+  <span id="vnw" hidden>上から<input id="vn" type="number" value="5" min="1" style="width:60px">枚 <button id="vgo">表示</button></span>
+  <div id="vlist"></div>
+  <button id="vclose">閉じる</button>
+</div></div>
+
+<script>
+const Z={deck:'デッキ',hand:'手札',ener:'エナゾーン',trash:'トラッシュ',life:'ライフクロス',check:'チェックゾーン',lrig:'ルリグ',lrigdeck:'ルリグデッキ',lrigtrash:'ルリグトラッシュ',s0:'シグニ左',s1:'シグニ中',s2:'シグニ右'};
+const PH=['アップ','ドロー','エナ','グロウ','メイン','アタック','エンド'];
+const NM=['自分','相手'];
+const $=id=>document.getElementById(id);
+let S=null,U=[],uid=0,sel=new Set(),mull=-1,V=null,VN=5;
+
+const J=k=>{try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e){return null}};
+function decks(){const o={},c=J('currentDeck'),s=J('savedDecks')||{};if(c)o['(編集中のデッキ)']=c;Object.keys(s).forEach(k=>o[k]=s[k]);return o}
+function save(){try{localStorage.setItem('btState',JSON.stringify({S,uid,mull}))}catch(e){}}
+function log(t){S.log.push(t);if(S.log.length>40)S.log.shift()}
+function snap(){U.push(JSON.stringify(S));if(U.length>40)U.shift()}
+function inst(c){return{u:++uid,c,d:0,f:0}}
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}}
+function mkP(){const o={};for(const k in Z)o[k]=[];return o}
+function draw(p,n){
+  const P=S.P[p];let k=0;
+  while(k<n){if(!P.deck.length&&!(R()&&refresh(p)))break;P.hand.push(P.deck.shift());k++}
+  return k;
+}
+function refresh(p){
+  const P=S.P[p];
+  if(!P.trash.length){S.over=1-p;log(NM[p]+'：デッキ切れ→'+NM[1-p]+'の勝利');alert('デッキもトラッシュも空です。勝者：'+NM[1-p]);return false}
+  P.deck=P.trash.splice(0);P.deck.forEach(x=>{x.d=0;x.f=0;x.pm=0;x.k=[]});shuffle(P.deck);
+  if(P.life.length){const x=P.life.shift();x.f=0;P.trash.push(x)}
+  log(NM[p]+'：リフレッシュ（トラッシュをデッキへ・ライフクロス1枚をトラッシュへ）');return true;
+}
+function find(u){for(let p=0;p<2;p++)for(const k in Z){const i=S.P[p][k].findIndex(x=>x.u===u);if(i>=0)return[p,k,i]}}
+
+function start(){
+  const all=decks(),D=[all[$('sel0').value],all[$('sel1').value]];
+  if(!D[0]||!D[1]){alert('デッキがありません。デッキ作成ページで作成・保存してください');return}
+  S={turn:1,ph:0,first:+$('fs').value,log:[],P:[mkP(),mkP()]};S.cur=S.first;
+  D.forEach((d,p)=>{
+    const m=[...(d.mainBurst||[]),...(d.mainNoBurst||[])],P=S.P[p];
+    P.deck=m.map(inst);P.lrigdeck=(d.lrigDeck||[]).map(inst);shuffle(P.deck);draw(p,5);
+  });
+  U=[];sel.clear();mull=0;log('対戦開始　先攻：'+NM[S.first]);save();render();
+}
+function endMull(redraw){
+  if(!S||mull<0)return;
+  const p=mull,P=S.P[p];
+  if(redraw&&sel.size){
+    const n=sel.size;
+    P.hand=P.hand.filter(x=>{if(sel.has(x.u)){P.deck.push(x);return false}return true});
+    shuffle(P.deck);draw(p,n);log(NM[p]+'：マリガン'+n+'枚');
+  }
+  for(let i=0;i<7;i++){const x=P.deck.shift();if(x){x.f=1;P.life.push(x)}}
+  if(!P.lrig.length){
+    const i0=P.lrigdeck.findIndex(x=>x.c.type==='ルリグ'&&String(x.c.level)==='0');
+    if(i0>=0)P.lrig.push(P.lrigdeck.splice(i0,1)[0]);else alert(NM[p]+'のルリグデッキにLv0のルリグがありません');
+  }
+  sel.clear();mull=p===0?1:-1;log(NM[p]+'：ライフ7枚・ルリグ配置');save();render();
+}
+function move(u,to,pos){
+  const[p,k,i]=find(u),P=S.P[p];
+  if(R()&&k==='hand'&&/^s\d$/.test(to)&&P[k][i].c.type==='シグニ'){
+    if(!playSigni(p,i,to))return;
+    snap();if(P[to].length)banish(p,to,true);
+  }else snap();
+  const x=P[k].splice(i,1)[0];
+  x.d=0;x.f=to==='life'?1:0;
+  if(pos==='top')P[to].unshift(x);else P[to].push(x);
+  log(NM[p]+'：'+x.c.name+'　'+Z[k]+'→'+Z[to]+(pos==='top'?'(上)':''));save();render();
+}
+function next(){
+  snap();S.ph++;
+  if(S.ph>6){
+    S.ph=0;S.turn++;S.cur=1-S.cur;S.grown=false;
+    S.P.forEach(P=>['s0','s1','s2','lrig'].forEach(k=>P[k].forEach(x=>{x.pm=0;x.k=[]})));
+  }
+  const p=S.cur,P=S.P[p];
+  if(S.ph===0){['ener','lrig','s0','s1','s2'].forEach(k=>P[k].forEach(x=>x.d=0));log('ターン'+S.turn+'（'+NM[p]+'）アップ')}
+  if(S.ph===1){const n=draw(p,S.turn===1?1:2);log(NM[p]+'：ドロー'+n+'枚')}
+  if(S.ph===6&&P.hand.length>6)alert(NM[p]+'の手札が'+P.hand.length+'枚です。6枚になるまでトラッシュへ送ってください');
+  save();render();
+}
+const A={
+  draw:p=>{draw(p,1);log(NM[p]+'：ドロー')},
+  shuf:p=>{shuffle(S.P[p].deck);log(NM[p]+'：デッキをシャッフル')},
+  enec:p=>{const P=S.P[p];if(P.deck.length){P.ener.push(P.deck.shift());log(NM[p]+'：エナチャージ '+P.ener[P.ener.length-1].c.name)}},
+  crush:p=>{
+    const P=S.P[p];if(!P.life.length){alert(NM[p]+'のライフクロスがありません');return}
+    const x=P.life.shift();x.f=0;P.check.push(x);log(NM[p]+'：クラッシュ '+x.c.name+(x.c.burst?'（ライフバースト有）':''));
+  },
+  chk:p=>{const P=S.P[p];P.ener.push(...P.check.splice(0).map(x=>(x.d=0,x)));log(NM[p]+'：チェック→エナ')}
+};
+
+
+// ===== ルール自動処理 =====
+const KW=['ランサー','Sランサー','ダブルクラッシュ','アサシン','シュート'];
+const R=()=>S&&S.over==null&&$('rule').checked;
+const num=v=>parseInt(String(v==null?'':v).replace(/[^\d-]/g,''))||0;
+const pw=x=>num(x.c.power)+(x.pm||0);
+function hasKw(x,k){
+  if((x.k||[]).includes(k))return true;
+  return String(x.c.text||'').split('<br>').some(t=>{
+    t=t.replace(/^【常】[^：]*：/,'');
+    return new RegExp('^【'+k+'[^】]*】').test(t)&&!/を得る/.test(t);
+  });
+}
+function banish(p,k,toTrash){
+  const P=S.P[p],x=P[k].pop();x.d=0;x.pm=0;x.k=[];
+  P[toTrash?'trash':'ener'].push(x);
+  log(NM[p]+'：'+x.c.name+' バニッシュ→'+(toTrash?'トラッシュ':'エナゾーン'));
+}
+function crushN(p,n){
+  const P=S.P[p];
+  for(let i=0;i<n;i++){
+    if(!P.life.length){S.over=1-p;log(NM[p]+'：ライフクロス0でダメージ→'+NM[1-p]+'の勝利');alert('勝者：'+NM[1-p]);return}
+    const x=P.life.shift();x.f=0;P.ener.push(x);
+    log(NM[p]+'：クラッシュ '+x.c.name+(x.c.burst?'（ライフバースト）':''));
+    if(x.c.burst){
+      const m=String(x.c.text||'').split('<br>').filter(t=>/ライフバースト/.test(t)).join('\n').replace(/【ライフバースト】：?/g,'');
+      alert('【ライフバースト】'+NM[p]+'：'+x.c.name+'\n'+m+'\n\n効果の処理は手動で行ってください');
+    }
+  }
+}
+function dmg(o,n){
+  if(confirm(NM[o]+'：ガードされましたか？\nOK＝ガードされた（ダメージなし）／キャンセル＝ダメージを与える')){log(NM[o]+'：ガード');return}
+  crushN(o,n);
+}
+function attack(u){
+  const[p,k,i]=find(u),P=S.P[p],x=P[k][i],o=1-p;
+  if(S.over!=null)return;
+  if(S.ph!==5||p!==S.cur){alert('自分のアタックフェイズではありません');return}
+  if(x.d){alert('ダウンしているためアタックできません');return}
+  snap();x.d=1;log(NM[p]+'：'+x.c.name+' でアタック');
+  if(k==='lrig')dmg(o,1);
+  else{
+    const z='s'+k[1],f=S.P[o][z];
+    if(f.length&&!hasKw(x,'アサシン')){
+      const d=f[f.length-1],a=pw(x),b=pw(d),L=hasKw(x,'ランサー')||hasKw(x,'Sランサー'),sh=hasKw(x,'シュート');
+      log('バトル：'+a+' vs '+b);
+      if(a>=b){banish(o,z,sh);if(L)crushN(o,1)}
+      if(a<=b&&S.over==null)banish(p,k,false);
+    }else dmg(o,hasKw(x,'ダブルクラッシュ')?2:1);
+  }
+  save();render();
+}
+function costOf(c){const o={};String(c.cost||'').replace(/《(.)》×(\d+)/g,(m,col,n)=>{o[col]=(o[col]||0)+ +n});return o}
+function pay(p,cost){
+  const pool=[...S.P[p].ener],use=[];
+  for(const col in cost){if(col==='無')continue;
+    for(let i=0;i<cost[col];i++){const j=pool.findIndex(x=>x.c.color===col);if(j<0)return null;use.push(pool.splice(j,1)[0])}}
+  const m=cost['無']||0;if(pool.length<m)return null;
+  for(let i=0;i<m;i++)use.push(pool.shift());
+  return use;
+}
+function grow(u){
+  const[p,k,i]=find(u),P=S.P[p],x=P[k][i],cur=P.lrig[P.lrig.length-1];
+  if(S.ph!==3||p!==S.cur){alert('自分のグロウフェイズではありません');return}
+  if(S.grown){alert('このターンはすでにグロウしています');return}
+  if(!cur||num(x.c.level)!==num(cur.c.level)+1){alert('現在のルリグよりレベルが1つ高いルリグのみグロウできます');return}
+  const use=pay(p,costOf(x.c));
+  if(!use){alert('エナゾーンが足りません（グロウコスト：'+(x.c.cost||'なし')+'）');return}
+  snap();
+  use.forEach(e=>{P.ener.splice(P.ener.indexOf(e),1);P.trash.push(e)});
+  P.lrigdeck.splice(i,1);x.d=0;P.lrig.push(x);S.grown=true;
+  log(NM[p]+'：グロウ '+x.c.name+'（エナ'+use.length+'枚をトラッシュへ）');save();render();
+}
+function playSigni(p,i,to){
+  const P=S.P[p],x=P.hand[i],lr=P.lrig[P.lrig.length-1],lv=num(x.c.level);
+  if(S.ph!==4||p!==S.cur){alert('自分のメインフェイズではありません');return false}
+  if(!lr){alert('ルリグがいません');return false}
+  if(lv>num(lr.c.level)){alert('センタールリグのレベルが足りません（シグニLv'+lv+'／ルリグLv'+num(lr.c.level)+'）');return false}
+  const sum=['s0','s1','s2'].filter(z=>z!==to).reduce((a,z)=>a+(P[z].length?num(P[z][P[z].length-1].c.level):0),0);
+  if(sum+lv>num(lr.c.limit)){alert('リミットを超えます（'+(sum+lv)+'／'+num(lr.c.limit)+'）');return false}
+  return true;
+}
+
+function cel(x,hid,p,k){
+  let e;
+  if(hid){e=document.createElement('div');e.className='card back';e.textContent='裏'}
+  else{e=document.createElement('img');e.className='card';e.src=x.c.image;e.loading='lazy'}
+  if(x.d)e.classList.add('dn');
+  if(sel.has(x.u))e.classList.add('sel');
+  e.onclick=ev=>{
+    ev.stopPropagation();
+    if(mull>=0){
+      if(p===mull&&k==='hand'){sel.has(x.u)?sel.delete(x.u):sel.add(x.u);render()}
+      return;
+    }
+    if(k==='deck'&&hid)return;
+    menu(x.u);
+  };
+  return e;
+}
+function zoneEl(p,k,all){
+  const P=S.P[p],z=document.createElement('div');z.className='zone';
+  const h=document.createElement('h4');h.textContent=Z[k]+'（'+P[k].length+'）';h.onclick=()=>view(p,k);z.appendChild(h);
+  const c=document.createElement('div');c.className='cards';
+  const a=P[k],top=(k==='deck'||k==='life')?a.slice(0,1):a.slice(-1);
+  const hideHand=p===1&&k==='hand'&&$('hide').checked&&mull!==1;
+  (all?a:top).forEach(x=>c.appendChild(cel(x,k==='deck'||x.f||hideHand,p,k)));
+  z.appendChild(c);
+  if(/^s\d$/.test(k)&&a.length){
+    const t=a[a.length-1],i=document.createElement('div');i.style.fontSize='12px';
+    i.textContent='P'+pw(t)+(t.pm?'('+(t.pm>0?'+':'')+t.pm+')':'')+((t.k||[]).length?' '+t.k.join('・'):'');z.appendChild(i);
+  }
+  return z;
+}
+function row(p,ks,all){const r=document.createElement('div');r.className='row';ks.forEach(k=>r.appendChild(zoneEl(p,k,all&&all.includes(k))));return r}
+function boardEl(p){
+  const d=document.createElement('div');d.className='pb'+(p===S.cur?' cur':'');
+  const t=document.createElement('div');t.className='bar';t.innerHTML='<b>'+NM[p]+(p===S.first?'（先攻）':'')+'</b>';
+  [['draw','ドロー'],['shuf','シャッフル'],['enec','エナチャージ'],['crush','クラッシュ'],['chk','チェック→エナ'],['peek','デッキ上']].forEach(([k,n])=>{
+    const b=document.createElement('button');b.textContent=n;
+    b.onclick=()=>{
+      if(mull>=0)return;
+      if(k==='peek'){view(p,'deck');return}
+      snap();A[k](p);save();render();
+    };
+    t.appendChild(b);
+  });
+  const rows=[row(p,['s0','s1','s2']),row(p,['lrig','ener'],['ener']),row(p,['life','deck','trash','check'],['check']),row(p,['lrigdeck','lrigtrash']),row(p,['hand'],['hand'])];
+  d.appendChild(t);(p===1?rows.reverse():rows).forEach(r=>d.appendChild(r));
+  return d;
+}
+function render(){
+  const b=$('board');b.innerHTML='';
+  if(!S){$('st').textContent='デッキを選んで「対戦開始」を押してください';return}
+  $('st').textContent=S.over!=null?'勝者：'+NM[S.over]+'（対戦終了）':'ターン'+S.turn+' ／ '+NM[S.cur]+'の'+PH[S.ph]+'フェイズ';
+  $('mullbar').hidden=mull<0;
+  $('mtxt').textContent=mull>=0?NM[mull]+'のマリガン：戻す手札をタップ':'';
+  b.appendChild(boardEl(1));b.appendChild(boardEl(0));
+  $('lg').innerHTML=S.log.slice(-6).reverse().join('<br>');
+  if(V)view(V.p,V.k,true);
+}
+
+const TO=[['hand'],['ener'],['trash'],['s0'],['s1'],['s2'],['lrig'],['lrigdeck'],['lrigtrash'],['deck','top'],['deck'],['life','top'],['check']];
+function menu(u){
+  const[p,k,i]=find(u),x=S.P[p][k][i];
+  $('mimg').src=x.c.image;$('mname').textContent=NM[p]+'：'+x.c.name+'（'+Z[k]+'）';
+  $('mtext').innerHTML=String(x.c.text||'').replace(/<br><br>/g,'<br>');
+  const b=$('mbtns');b.innerHTML='';
+  const add=(t,f)=>{const e=document.createElement('button');e.textContent=t;e.onclick=()=>{f();$('menu').hidden=true};b.appendChild(e)};
+  add(x.d?'アップにする':'ダウンにする',()=>{snap();x.d=x.d?0:1;save();render()});
+  add(x.f?'表にする':'裏にする',()=>{snap();x.f=x.f?0:1;save();render()});
+  if(R()){
+    if((k==='lrig'||/^s\d$/.test(k))&&p===S.cur&&S.ph===5)add('⚔ アタック宣言',()=>attack(u));
+    if(k==='lrigdeck'&&x.c.type==='ルリグ')add('▲ グロウする',()=>grow(u));
+    if(/^s\d$/.test(k)){
+      [1000,-1000,5000,-5000].forEach(d=>add('パワー'+(d>0?'+':'')+d,()=>{snap();x.pm=(x.pm||0)+d;save();render()}));
+      KW.forEach(w=>add((x.k||[]).includes(w)?'解除【'+w+'】':'付与【'+w+'】',()=>{
+        snap();x.k=x.k||[];const j=x.k.indexOf(w);if(j>=0)x.k.splice(j,1);else x.k.push(w);save();render();
+      }));
+    }
+  }
+  TO.forEach(([t,pos])=>{if(t!==k||pos)add(Z[t]+(t==='deck'?(pos?'の上':'の下'):t==='life'?'の上':'')+'へ',()=>move(u,t,pos))});
+  $('menu').hidden=false;
+}
+function view(p,k,keep){
+  V={p,k};if(!keep&&k==='deck')VN=5;
+  const a=S.P[p][k];
+  $('vtitle').textContent=NM[p]+'：'+Z[k]+'（'+a.length+'枚）'+(k==='deck'?'　※上から順':'');
+  $('vnw').hidden=k!=='deck';$('vn').value=VN;
+  const l=$('vlist');l.innerHTML='';
+  (k==='deck'?a.slice(0,VN):a).forEach(x=>{const e=cel(x,false,p,k);e.onclick=ev=>{ev.stopPropagation();if(mull<0)menu(x.u)};l.appendChild(e)});
+  $('view').hidden=false;
+}
+
+$('start').onclick=()=>{if(!S||confirm('現在の対戦を破棄して最初からやり直しますか？'))start()};
+$('undo').onclick=()=>{if(mull>=0||!U.length)return;S=JSON.parse(U.pop());save();render()};
+$('mull-ok').onclick=()=>endMull(true);
+$('mull-keep').onclick=()=>endMull(false);
+$('next').onclick=()=>{if(S&&mull<0&&S.over==null)next()};
+$('hide').onchange=()=>{if(S)render()};
+$('vgo').onclick=()=>{VN=Math.max(1,+$('vn').value||5);if(V)view(V.p,V.k,true)};
+$('vclose').onclick=()=>{V=null;$('view').hidden=true};
+$('mclose').onclick=()=>{$('menu').hidden=true};
+
+(function init(){
+  const d=decks();
+  ['sel0','sel1'].forEach(id=>Object.keys(d).forEach(k=>{const o=document.createElement('option');o.value=o.textContent=k;$(id).appendChild(o)}));
+  const p=J('btState');
+  if(p&&p.S){S=p.S;uid=p.uid||0;mull=typeof p.mull==='number'?p.mull:-1}
+  render();
+})();
+</script>
+</body>
+</html>
