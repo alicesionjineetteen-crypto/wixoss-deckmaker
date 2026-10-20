@@ -27,7 +27,11 @@ button:active{background:#46618f}
 .modal{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:9}
 .box{background:#223;border-radius:10px;padding:12px;max-width:96vw;max-height:92vh;overflow:auto;text-align:center}
 #mimg{width:200px;max-width:60vw;border-radius:6px}
-#vlist{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+#vlist,#plist{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}
+.phbar{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin:4px 0;padding:4px;background:#1a2233;border-radius:8px}
+.phbar button{font-weight:bold;background:#3b6b3b;margin-right:6px}
+.ch{font-size:11px;padding:2px 6px;border-radius:10px;background:#2d3a52;color:#889}
+.ch.on{background:#fc0;color:#000;font-weight:bold}
 </style>
 </head>
 <body>
@@ -43,7 +47,6 @@ button:active{background:#46618f}
   <button id="undo">↩ 戻す</button>
 </div>
 <div class="bar">
-  <button id="next">次のフェイズ ▶</button>
   <label><input type="checkbox" id="hide" checked>相手の手札を隠す</label>
   <label><input type="checkbox" id="rule" checked>ルール自動処理</label>
 </div>
@@ -60,6 +63,10 @@ button:active{background:#46618f}
   <img id="mimg" alt=""><div id="mname"></div><div id="mtext" style="font-size:12px;text-align:left;max-width:320px;margin:4px auto"></div><div id="mbtns"></div>
   <button id="mclose">閉じる</button>
 </div></div>
+<div id="pay" class="modal" hidden><div class="box">
+  <div id="ptitle"></div><div id="preq" style="margin:4px"></div><div id="plist"></div>
+  <button id="pok">支払う</button><button id="pcancel">キャンセル</button>
+</div></div>
 <div id="view" class="modal" hidden><div class="box">
   <div id="vtitle"></div>
   <span id="vnw" hidden>上から<input id="vn" type="number" value="5" min="1" style="width:60px">枚 <button id="vgo">表示</button></span>
@@ -69,7 +76,7 @@ button:active{background:#46618f}
 
 <script>
 const Z={deck:'デッキ',hand:'手札',ener:'エナゾーン',trash:'トラッシュ',life:'ライフクロス',check:'チェックゾーン',lrig:'ルリグ',lrigdeck:'ルリグデッキ',lrigtrash:'ルリグトラッシュ',s0:'シグニ左',s1:'シグニ中',s2:'シグニ右'};
-const PH=['アップ','ドロー','エナ','グロウ','メイン','アタック','エンド'];
+const PH=['アップ','ドロー','エナ','グロウ','メイン','プレアタック','ディフェンス','シグニアタック','ルリグアタック','エンド'];
 const NM=['自分','相手'];
 const $=id=>document.getElementById(id);
 let S=null,U=[],uid=0,sel=new Set(),mull=-1,V=null,VN=5;
@@ -119,7 +126,9 @@ function endMull(redraw){
     const i0=P.lrigdeck.findIndex(x=>x.c.type==='ルリグ'&&String(x.c.level)==='0');
     if(i0>=0)P.lrig.push(P.lrigdeck.splice(i0,1)[0]);else alert(NM[p]+'のルリグデッキにLv0のルリグがありません');
   }
-  sel.clear();mull=p===0?1:-1;log(NM[p]+'：ライフ7枚・ルリグ配置');save();render();
+  sel.clear();mull=p===0?1:-1;log(NM[p]+'：ライフ7枚・ルリグ配置');
+  if(mull<0)startTurn();
+  save();render();
 }
 function move(u,to,pos){
   const[p,k,i]=find(u),P=S.P[p];
@@ -132,16 +141,25 @@ function move(u,to,pos){
   if(pos==='top')P[to].unshift(x);else P[to].push(x);
   log(NM[p]+'：'+x.c.name+'　'+Z[k]+'→'+Z[to]+(pos==='top'?'(上)':''));save();render();
 }
-function next(){
-  snap();S.ph++;
-  if(S.ph>6){
-    S.ph=0;S.turn++;S.cur=1-S.cur;S.grown=false;
-    S.P.forEach(P=>['s0','s1','s2','lrig'].forEach(k=>P[k].forEach(x=>{x.pm=0;x.k=[]})));
-  }
+function startTurn(){
   const p=S.cur,P=S.P[p];
-  if(S.ph===0){['ener','lrig','s0','s1','s2'].forEach(k=>P[k].forEach(x=>x.d=0));log('ターン'+S.turn+'（'+NM[p]+'）アップ')}
-  if(S.ph===1){const n=draw(p,S.turn===1?1:2);log(NM[p]+'：ドロー'+n+'枚')}
-  if(S.ph===6&&P.hand.length>6)alert(NM[p]+'の手札が'+P.hand.length+'枚です。6枚になるまでトラッシュへ送ってください');
+  ['ener','lrig','s0','s1','s2'].forEach(k=>P[k].forEach(x=>x.d=0));
+  S.grown=false;S.ph=1;log('ターン'+S.turn+'（'+NM[p]+'）アップ');
+  const n=draw(p,S.turn===1?1:2);log(NM[p]+'：ドロー'+n+'枚');
+  if(S.over==null)S.ph=2;
+}
+function next(){
+  if(!S||S.over!=null)return;
+  const P=S.P[S.cur];
+  if(S.ph===9){
+    if(R()&&P.hand.length>6){alert('手札が'+P.hand.length+'枚です。6枚になるまでトラッシュへ送ってください');return}
+    snap();
+    S.P.forEach(Q=>['s0','s1','s2','lrig'].forEach(k=>Q[k].forEach(x=>{x.pm=0;x.k=[]})));
+    S.turn++;S.cur=1-S.cur;startTurn();save();render();return;
+  }
+  snap();
+  if(S.ph===4&&S.turn===1&&R()){S.ph=9;log('先攻1ターン目：アタックフェイズをスキップ')}
+  else S.ph++;
   save();render();
 }
 const A={
@@ -185,48 +203,70 @@ function crushN(p,n){
     }
   }
 }
-function dmg(o,n){
-  if(confirm(NM[o]+'：ガードされましたか？\nOK＝ガードされた（ダメージなし）／キャンセル＝ダメージを与える')){log(NM[o]+'：ガード');return}
+function dmg(o,n,guardable){
+  if(guardable&&confirm(NM[o]+'：ガードされましたか？\nOK＝ガードされた（ダメージなし）／キャンセル＝ダメージを与える')){log(NM[o]+'：ガード');return}
   crushN(o,n);
 }
 function attack(u){
   const[p,k,i]=find(u),P=S.P[p],x=P[k][i],o=1-p;
   if(S.over!=null)return;
-  if(S.ph!==5||p!==S.cur){alert('自分のアタックフェイズではありません');return}
+  if(p!==S.cur||S.ph!==(k==='lrig'?8:7)){alert(k==='lrig'?'自分のルリグアタックステップではありません':'自分のシグニアタックステップではありません');return}
   if(x.d){alert('ダウンしているためアタックできません');return}
   snap();x.d=1;log(NM[p]+'：'+x.c.name+' でアタック');
-  if(k==='lrig')dmg(o,1);
+  if(k==='lrig')dmg(o,1,true);
   else{
     const z='s'+k[1],f=S.P[o][z];
     if(f.length&&!hasKw(x,'アサシン')){
       const d=f[f.length-1],a=pw(x),b=pw(d),L=hasKw(x,'ランサー')||hasKw(x,'Sランサー'),sh=hasKw(x,'シュート');
-      log('バトル：'+a+' vs '+b);
+      log('バトル：'+a+' vs '+b+(a>=b?'（アタックした側の勝ち）':'（変化なし）'));
       if(a>=b){banish(o,z,sh);if(L)crushN(o,1)}
-      if(a<=b&&S.over==null)banish(p,k,false);
-    }else dmg(o,hasKw(x,'ダブルクラッシュ')?2:1);
+    }else dmg(o,hasKw(x,'ダブルクラッシュ')?2:1,false);
   }
   save();render();
 }
 function costOf(c){const o={};String(c.cost||'').replace(/《(.)》×(\d+)/g,(m,col,n)=>{o[col]=(o[col]||0)+ +n});return o}
-function pay(p,cost){
-  const pool=[...S.P[p].ener],use=[];
-  for(const col in cost){if(col==='無')continue;
-    for(let i=0;i<cost[col];i++){const j=pool.findIndex(x=>x.c.color===col);if(j<0)return null;use.push(pool.splice(j,1)[0])}}
-  const m=cost['無']||0;if(pool.length<m)return null;
-  for(let i=0;i<m;i++)use.push(pool.shift());
-  return use;
+function payUI(p,cost,title,ok){
+  const P=S.P[p],tot=Object.values(cost).reduce((a,b)=>a+b,0);
+  if(!tot){ok([]);return}
+  const ch=new Set(),req=Object.keys(cost).map(c=>c+'×'+cost[c]).join(' ');
+  const paint=()=>{
+    $('ptitle').textContent=NM[p]+'：'+title;
+    const l=$('plist');l.innerHTML='';
+    P.ener.forEach(x=>{
+      const e=cel(x,false,p,'ener');
+      e.onclick=ev=>{ev.stopPropagation();ch.has(x.u)?ch.delete(x.u):ch.add(x.u);paint()};
+      if(ch.has(x.u))e.classList.add('sel');
+      l.appendChild(e);
+    });
+    const c=P.ener.filter(x=>ch.has(x.u));
+    $('preq').textContent='コスト：'+req+'　選択：'+c.length+'／'+tot+'（支払うエナをタップ）';
+    $('pok').disabled=!(c.length===tot&&Object.keys(cost).every(k=>k==='無'||c.filter(x=>x.c.color===k).length>=cost[k]));
+  };
+  $('pok').onclick=()=>{const c=P.ener.filter(x=>ch.has(x.u));$('pay').hidden=true;ok(c)};
+  $('pcancel').onclick=()=>{$('pay').hidden=true};
+  paint();$('pay').hidden=false;
 }
+function spend(P,use){use.forEach(e=>{P.ener.splice(P.ener.indexOf(e),1);P.trash.push(e)})}
 function grow(u){
   const[p,k,i]=find(u),P=S.P[p],x=P[k][i],cur=P.lrig[P.lrig.length-1];
   if(S.ph!==3||p!==S.cur){alert('自分のグロウフェイズではありません');return}
   if(S.grown){alert('このターンはすでにグロウしています');return}
   if(!cur||num(x.c.level)!==num(cur.c.level)+1){alert('現在のルリグよりレベルが1つ高いルリグのみグロウできます');return}
-  const use=pay(p,costOf(x.c));
-  if(!use){alert('エナゾーンが足りません（グロウコスト：'+(x.c.cost||'なし')+'）');return}
-  snap();
-  use.forEach(e=>{P.ener.splice(P.ener.indexOf(e),1);P.trash.push(e)});
-  P.lrigdeck.splice(i,1);x.d=0;P.lrig.push(x);S.grown=true;
-  log(NM[p]+'：グロウ '+x.c.name+'（エナ'+use.length+'枚をトラッシュへ）');save();render();
+  if(cur.c.class&&x.c.class&&cur.c.class!==x.c.class){alert('同じリグタイプのルリグのみグロウできます');return}
+  payUI(p,costOf(x.c),'グロウコスト（'+(x.c.cost||'なし')+'）の支払い',use=>{
+    snap();spend(P,use);
+    const[,,j]=find(u);P.lrigdeck.splice(j,1);x.d=0;P.lrig.push(x);S.grown=true;
+    log(NM[p]+'：グロウ '+x.c.name+'（エナ'+use.length+'枚をトラッシュへ）');save();render();
+  });
+}
+function useCard(u){
+  const[p,k]=find(u),P=S.P[p],x=P[k][find(u)[2]];
+  payUI(p,costOf(x.c),x.c.name+' のコスト',use=>{
+    snap();spend(P,use);
+    const[,k2,i2]=find(u);P[k2].splice(i2,1);x.d=0;P[k==='hand'?'trash':'lrigtrash'].push(x);
+    log(NM[p]+'：'+x.c.name+' を使用');save();render();
+    alert(NM[p]+'：'+x.c.name+' を使用しました。\n'+String(x.c.text||'').replace(/<br>/g,'\n')+'\n\n効果は手動で処理してください');
+  });
 }
 function playSigni(p,i,to){
   const P=S.P[p],x=P.hand[i],lr=P.lrig[P.lrig.length-1],lv=num(x.c.level);
@@ -270,6 +310,13 @@ function zoneEl(p,k,all){
   return z;
 }
 function row(p,ks,all){const r=document.createElement('div');r.className='row';ks.forEach(k=>r.appendChild(zoneEl(p,k,all&&all.includes(k))));return r}
+function phaseBar(){
+  const d=document.createElement('div');d.className='phbar';
+  const b=document.createElement('button');b.textContent=S.ph===9?'ターン終了 ▶':'次のフェイズ ▶';
+  b.onclick=()=>{if(S&&mull<0&&S.over==null)next()};d.appendChild(b);
+  PH.forEach((n,i)=>{const e=document.createElement('span');e.className='ch'+(i===S.ph?' on':'');e.textContent=n;d.appendChild(e)});
+  return d;
+}
 function boardEl(p){
   const d=document.createElement('div');d.className='pb'+(p===S.cur?' cur':'');
   const t=document.createElement('div');t.className='bar';t.innerHTML='<b>'+NM[p]+(p===S.first?'（先攻）':'')+'</b>';
@@ -283,6 +330,7 @@ function boardEl(p){
     t.appendChild(b);
   });
   const rows=[row(p,['s0','s1','s2']),row(p,['lrig','ener'],['ener']),row(p,['life','deck','trash','check'],['check']),row(p,['lrigdeck','lrigtrash']),row(p,['hand'],['hand'])];
+  if(p===0)rows.splice(rows.length-1,0,phaseBar());
   d.appendChild(t);(p===1?rows.reverse():rows).forEach(r=>d.appendChild(r));
   return d;
 }
@@ -307,7 +355,9 @@ function menu(u){
   add(x.d?'アップにする':'ダウンにする',()=>{snap();x.d=x.d?0:1;save();render()});
   add(x.f?'表にする':'裏にする',()=>{snap();x.f=x.f?0:1;save();render()});
   if(R()){
-    if((k==='lrig'||/^s\d$/.test(k))&&p===S.cur&&S.ph===5)add('⚔ アタック宣言',()=>attack(u));
+    if(p===S.cur&&((k==='lrig'&&S.ph===8)||(/^s\d$/.test(k)&&S.ph===7)))add('⚔ アタック宣言',()=>attack(u));
+    if(k==='lrigdeck'&&['アーツ','ピース'].includes(x.c.type)&&((p===S.cur&&(S.ph===4||S.ph===5))||(p!==S.cur&&S.ph===6)))add('🎴 使用する',()=>useCard(u));
+    if(k==='hand'&&x.c.type==='スペル'&&p===S.cur&&S.ph===4)add('✨ スペル使用',()=>useCard(u));
     if(k==='lrigdeck'&&x.c.type==='ルリグ')add('▲ グロウする',()=>grow(u));
     if(/^s\d$/.test(k)){
       [1000,-1000,5000,-5000].forEach(d=>add('パワー'+(d>0?'+':'')+d,()=>{snap();x.pm=(x.pm||0)+d;save();render()}));
@@ -333,10 +383,10 @@ $('start').onclick=()=>{if(!S||confirm('現在の対戦を破棄して最初か�
 $('undo').onclick=()=>{if(mull>=0||!U.length)return;S=JSON.parse(U.pop());save();render()};
 $('mull-ok').onclick=()=>endMull(true);
 $('mull-keep').onclick=()=>endMull(false);
-$('next').onclick=()=>{if(S&&mull<0&&S.over==null)next()};
 $('hide').onchange=()=>{if(S)render()};
 $('vgo').onclick=()=>{VN=Math.max(1,+$('vn').value||5);if(V)view(V.p,V.k,true)};
 $('vclose').onclick=()=>{V=null;$('view').hidden=true};
+$('pcancel').onclick=()=>{$('pay').hidden=true};
 $('mclose').onclick=()=>{$('menu').hidden=true};
 
 (function init(){
