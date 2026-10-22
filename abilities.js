@@ -43,9 +43,9 @@ const TRIG=[[/^このシグニがアタックしたとき$/,'self_attack'],[/^�
 function trigKey(t){for(const[re,k]of TRIG)if(re.test(t))return k;return 'other'}
 function parseCost(tokens,extra){
   const c={};let m;
-  const re=/《([^》]*)》/g;
+  const re=/《([^》]*)》|\[([白赤青緑黒無])\]/g;
   while(m=re.exec(tokens)){
-    const t=m[1];
+    const t=m[1]||m[2];
     if(/^ターン(\d+)回$/.test(t))c.once='T'+RegExp.$1;
     else if(/^ゲーム(\d+)回$/.test(t))c.once='G'+RegExp.$1;
     else if(t==='ダウン')c.down=1;
@@ -69,7 +69,8 @@ function parseTarget(str){
     else if(m=/^＜([^＞]+)＞の/.exec(t))r.f.push({cls:m[1]});
     else if(m=new RegExp('^(['+COL+'])の').exec(t))r.f.push({col:m[1]});
     else if(m=/^他の/.exec(t))r.f.push({other:1});
-    else if(m=/^\[ガード\]を持つ/.exec(t))r.f.push({guard:1});
+    else if(m=/^\[ガード\]を持(つ|たない)/.exec(t))r.f.push({guard:1,neg:m[1]==='たない'});
+    else if(m=/^《([白赤青緑黒無])》を持(つ|たない)/.exec(t))r.f.push({hasCol:m[1],has:m[2]==='つ'});
     else break;
     t=t.slice(m[0].length);
   }
@@ -82,14 +83,15 @@ function parseTarget(str){
 const ACT=[
   [/^(?:バニッシュする)$/,'banish'],[/^手札に戻す$/,'bounce'],[/^ダウンし凍結する$/,'downfreeze'],[/^ダウンする$/,'down'],
   [/^アップする$/,'up'],[/^トラッシュに置く$/,'trash'],[/^エナゾーンに置く$/,'toener'],[/^デッキの一番下に置く$/,'deckbottom'],
-  [/^手札に加える$/,'tohand'],[/^場に出す$/,'play'],[/^凍結する$/,'freeze']
+  [/^手札に加えるか場に出す$/,'tohand_or_play'],[/^手札に加える$/,'tohand'],[/^場に出す$/,'play'],[/^凍結する$/,'freeze']
 ];
 function parseAction(rest){
   rest=rest.trim();let m;
   if(m=/^(?:それ|そのカード|そのシグニ)(?:ら)?を(.+)$/.exec(rest)){for(const[re,op]of ACT)if(re.test(m[1]))return{op};}
-  if(m=/^ターン終了時まで、それ(?:ら)?のパワーを([+-]?\d+)する$/.exec(rest))return{op:'power',v:num(m[1])};
+  if(m=/^(次の対戦相手の)?ターン終了時まで、それ(?:ら)?のパワーを([+-]?\d+)する$/.exec(rest))return{op:'power',v:num(m[2]),dur:m[1]?'nextopp':''};
+  if(/^このターン、次にそれがアタックしたとき、そのアタックを無効にする$/.test(rest))return{op:'negateattack'};
   if(/^ターン終了時まで、それは「【常】：アタックできない。?」を得る$/.test(rest))return{op:'noattack'};
-  if(m=/^ターン終了時まで、それ(?:ら)?は「(.+)」を得る$/.exec(rest))return{op:'grant',text:m[1]};
+  if(m=/^(次の対戦相手の)?ターン終了時まで、それ(?:ら)?は「(.+)」を得る$/.exec(rest))return{op:'grant',text:m[2],dur:m[1]?'nextopp':''};
   if(/^ターン終了時まで、それ(?:ら)?は能力を失う$/.test(rest))return{op:'nulltarget'};
   if(m=/^ターン終了時まで、それは【(アサシン|ランサー|Sランサー|ダブルクラッシュ|シュート)[^】]*】を得る$/.exec(rest))return{op:'grantkw',kw:m[1]};
   return null;
@@ -116,12 +118,21 @@ function sentenceCore(s,s0){
   }
   { const a=parseAction(s);if(a)return Object.assign({ref:'prev'},a); }
   if(m=/^(.+?)(?:を)?対象とする$/.exec(s)){const tg=parseTarget(m[1]);if(tg)return{op:'settarget',target:tg}}
-  if(m=/^(.+?)(?:を)?対象とし、手札を(\d+)枚捨ててもよい$/.exec(s)){const tg=parseTarget(m[1]);if(tg)return[{op:'settarget',target:tg},{op:'optcost',discard:num(m[2])}]}
-  if(m=/^(.+?)(?:を)?対象とし、((?:《[^》]*》)+)を支払ってもよい$/.exec(s)){const tg=parseTarget(m[1]);if(tg)return[{op:'settarget',target:tg},{op:'optcost',ener:parseCost(m[2],'').ener||{}}]}
+  if(m=/^(.+?)(?:を)?対象とし、(.+てもよい)$/.exec(s)){const tg=parseTarget(m[1]);if(tg){const c=sentenceCore(m[2],m[2]);if(c&&!Array.isArray(c)&&c.op==='optcost')return[{op:'settarget',target:tg},c]}}
   if(m=/^手札を(\d+)枚捨ててもよい$/.exec(s))return{op:'optcost',discard:num(m[1])};
   if(m=/^手札から(カード|シグニ|＜[^＞]+＞のシグニ)を(\d+)枚捨ててもよい$/.exec(s))return{op:'optcost',discard:num(m[2]),f:m[1]==='カード'?{}:m[1]==='シグニ'?{type:'シグニ'}:{type:'シグニ',cls:m[1].slice(1,m[1].indexOf('＞'))}};
-  if(m=/^((?:《[^》]*》)+)を支払ってもよい$/.exec(s))return{op:'optcost',ener:parseCost(m[1],'').ener||{}};
+  if(m=/^((?:《[^》]*》|\[[白赤青緑黒無]\])+)を支払ってもよい$/.exec(s))return{op:'optcost',ener:parseCost(m[1],'').ener||{}};
+  if(m=/^あなたのエナゾーンから(カード|シグニ|＜[^＞]+＞のシグニ)(\d+)枚をトラッシュに置いてもよい$/.exec(s))return{op:'optcost',zone:'ener',n:num(m[2]),f:m[1]==='カード'?{}:m[1]==='シグニ'?{type:'シグニ'}:{type:'シグニ',cls:m[1].slice(1,m[1].indexOf('＞'))}};
   if(/^あなたのデッキの一番上を公開する$/.test(s))return{op:'revealtop'};
+  if(/^あなたのデッキの一番上を見る$/.test(s))return{op:'peek'};
+  if(/^あなたのデッキの一番上のカードをトラッシュに置く$/.test(s))return{op:'mill',n:1};
+  if(m=/^あなたか対戦相手のデッキの上からカードを(\d+)枚トラッシュに置く$/.exec(s))return{op:'mill',n:num(m[1]),who:'choose'};
+  if(m=/^各プレイヤーは自分のデッキの上からカードを(\d+)枚トラッシュに置く$/.exec(s))return{op:'mill',n:num(m[1]),who:'both'};
+  if(m=/^対戦相手のライフクロス(\d+)枚をクラッシュする$/.exec(s))return{op:'crush',n:num(m[1])};
+  if(m=/^手札を(\d+)枚捨て、カードを(\d+)枚引く$/.exec(s))return[{op:'discard',n:num(m[1]),who:'me'},{op:'draw',n:num(m[2])}];
+  if(m=/^(次の対戦相手の)?ターン終了時まで、あなたのすべてのシグニのパワーを([+-]\d+)する$/.exec(s))return{op:'powerall',v:num(m[2]),dur:m[1]?'nextopp':''};
+  if(m=/^【(ルリグ|シグニ)バリア】(\d+)つを得る$/.exec(s))return{op:'barrier',kind:m[1],n:num(m[2])};
+  if(m=/^対戦相手は自分のエナゾーンからカード(\d+)枚を選びトラッシュに置く$/.exec(s))return{op:'trashener',n:num(m[1])};
   if(m=/^対戦相手のデッキの上からカードを(\d+)枚トラッシュに置く$/.exec(s))return{op:'mill',n:num(m[1]),who:'opp'};
   if(m=/^(?:あなたは)?カードを(\d+)枚引く$/.exec(s))return{op:'draw',n:num(m[1])};
   if(m=/^カードを(\d+)枚引き、手札を(\d+)枚捨てる$/.exec(s))return{op:'drawdiscard',n:num(m[1]),d:num(m[2])};
@@ -195,8 +206,32 @@ function parseBody(body){
   return out;
 }
 
+const sc=c=>c.slice(1,c.indexOf('＞'));
+function parseCondS(t){
+  let m;
+  if(m=/^あなたの手札が(\d+)枚以上ある$/.exec(t))return{t:'hand',n:num(m[1])};
+  if(m=/^あなたのエナゾーンに＜([^＞]+)＞のシグニがある$/.exec(t))return{t:'zone_cls',z:'ener',cls:m[1],n:1};
+  if(m=/^あなたのエナゾーンに＜([^＞]+)＞のシグニが(\d+)枚以上ある$/.exec(t))return{t:'zone_cls',z:'ener',cls:m[1],n:num(m[2])};
+  if(m=/^あなたのトラッシュに＜([^＞]+)＞のシグニが(\d+)枚以上ある$/.exec(t))return{t:'zone_cls',z:'trash',cls:m[1],n:num(m[2])};
+  if(m=/^あなたのトラッシュにカードが(\d+)枚以上ある$/.exec(t))return{t:'zone_n',z:'trash',n:num(m[1])};
+  if(/^あなたのトラッシュにスペルがある$/.test(t))return{t:'zone_type',z:'trash',type:'スペル',n:1};
+  if(m=/^あなたの場に(他の)?＜([^＞]+)＞のシグニがある$/.exec(t))return{t:'field_cls',cls:m[2],other:!!m[1]};
+  if(/^このシグニが中央のシグニゾーンにある$/.test(t))return{t:'center'};
+  if(/^このシグニが覚醒状態である$/.test(t))return{t:'awake'};
+  if(/^このシグニがダウン状態である$/.test(t))return{t:'down'};
+  return null;
+}
+function parseStatic(a){
+  let m;const b=a.body.replace(/。$/,'');
+  if(m=/^(?:(.+?)かぎり、)?このシグニのパワーは([+-]\d+)される$/.exec(b)){
+    const cond=m[1]?parseCondS(m[1]):{t:'always'};
+    if(cond)return{type:'power',v:num(m[2]),cond,turn:a.cost&&a.cost.turn||''};
+  }
+  return null;
+}
 function parseCard(text){
   return splitAbilities(text).map(a=>{
+    if(a.kind==='常'){const st=parseStatic(a);if(st)return Object.assign({},a,{static:st,steps:[{op:'static'}]})}
     const steps=['LB','出','自','起','効果','常'].includes(a.kind)?parseBody(a.body):[];
     return Object.assign({},a,{steps});
   });

@@ -173,7 +173,7 @@ function next(){
     snap();
     enqueue(async()=>{
       await fireAll('end_me',S.cur);await fireAll('end_any');
-      S.P.forEach(Q=>{Q.shield=[];['s0','s1','s2','lrig'].forEach(k=>Q[k].forEach(x=>{x.pm=0;x.k=[];x.na=0;x.nl=0;x.ga=[]}))});
+      S.P.forEach(Q=>{Q.shield=[];['s0','s1','s2','lrig'].forEach(k=>Q[k].forEach(x=>{x.pm=0;x.k=[];x.na=0;x.nl=0;x.nega=0;x.ga=(x.ga||[]).filter(a=>a._until>S.turn);x.pmx=(x.pmx||[]).filter(e=>e.until>S.turn)}))});
       S.turn++;S.cur=1-S.cur;startTurn();
     });return;
   }
@@ -197,7 +197,33 @@ const P0=p=>S.P[p];
 const KW=['ランサー','Sランサー','ダブルクラッシュ','アサシン','シュート'];
 const R=()=>S&&S.over==null&&$('rule').checked;
 const num=v=>parseInt(String(v==null?'':v).replace(/[^\d-]/g,''))||0;
-const pw=x=>num(x.c.power)+(x.pm||0);
+const pw=x=>num(x.c.power)+(x.pm||0)+(x.pmx||[]).reduce((a,e)=>a+e.v,0)+staticPower(x);
+function staticOk(c,x,p,k){
+  const P=S.P[p],clsn=(zs,cls)=>zs.filter(y=>String(y.c.class||'').split('：').pop()===cls).length;
+  switch(c.t){
+    case 'always':return true;
+    case 'hand':return P.hand.length>=c.n;
+    case 'zone_cls':return clsn(P[c.z],c.cls)>=c.n;
+    case 'zone_n':return P[c.z].length>=c.n;
+    case 'zone_type':return P[c.z].filter(y=>y.c.type===c.type).length>=c.n;
+    case 'field_cls':return['s0','s1','s2'].some(z=>{const y=P[z][P[z].length-1];return y&&(!c.other||y.u!==x.u)&&String(y.c.class||'').split('：').pop()===c.cls});
+    case 'center':return k==='s1';
+    case 'awake':return !!x.aw;
+    case 'down':return !!x.d;
+  }
+  return false;
+}
+function staticPower(x){
+  if(!S||typeof abil!=='function')return 0;
+  const f=find(x.u);if(!f||!/^s\d$/.test(f[1]))return 0;
+  let v=0;
+  for(const a of abil(x)){
+    const st=a.static;if(!st||st.type!=='power')continue;
+    if(st.turn==='自分ターン'&&f[0]!==S.cur)continue;if(st.turn==='相手ターン'&&f[0]===S.cur)continue;
+    if(staticOk(st.cond,x,f[0],f[1]))v+=st.v;
+  }
+  return v;
+}
 function hasKw(x,k){
   if(x.nl)return false;
   if((x.k||[]).includes(k))return true;
@@ -223,6 +249,8 @@ function crushN(p,n,soft){
 function dmg(o,n,guardable,from){
   const Q2=S.P[o],si=(Q2.shield||[]).findIndex(v=>v===from||v==='any');
   if(si>=0){Q2.shield.splice(si,1);log(NM[o]+'：ダメージを受けない（効果）');return}
+  const bk=from==='ルリグ'?'lbar':from==='シグニ'?'sbar':'';
+  if(bk&&Q2[bk]>0){Q2[bk]--;log(NM[o]+'：【'+from+'バリア】でダメージを防いだ（残り'+Q2[bk]+'）');return}
   if(guardable&&confirm(NM[o]+'：ガードされましたか？\nOK＝ガードされた（ダメージなし）／キャンセル＝ダメージを与える')){log(NM[o]+'：ガード');return}
   crushN(o,n);
 }
@@ -236,6 +264,7 @@ function attack(u){
   enqueue(async()=>{
     await fireTrig('self_attack',p,x);
     const f2=find(u);if(!f2||S.over!=null)return;
+    if(x.nega){x.nega=0;log(x.c.name+'：アタックは無効になった');return}
     const k2=f2[1];
     if(k2==='lrig')dmg(o,1,true,'ルリグ');
     else{
@@ -264,7 +293,9 @@ function payUI(p,cost,title,ok,cancel){
     });
     const c=P.ener.filter(x=>ch.has(x.u));
     $('preq').textContent='コスト：'+req+'　選択：'+c.length+'／'+tot+'（支払うエナをタップ）';
-    $('pok').disabled=!(c.length===tot&&Object.keys(cost).every(k=>k==='無'||P.multi||c.filter(x=>x.c.color===k).length>=cost[k]));
+    const wild=x=>P.multi||/【マルチエナ】/.test(String(x.c.text||'')),nw=c.filter(x=>!wild(x));
+    const deficit=Object.keys(cost).reduce((a,k)=>k==='無'?a:a+Math.max(0,cost[k]-nw.filter(x=>x.c.color===k).length),0);
+    $('pok').disabled=!(c.length===tot&&deficit<=c.length-nw.length);
   };
   $('pok').onclick=()=>{const c=P.ener.filter(x=>ch.has(x.u));$('pay').hidden=true;ok(c)};
   $('pcancel').onclick=()=>{$('pay').hidden=true;if(cancel)cancel()};
@@ -364,7 +395,8 @@ function tmatch(x,sel,ctx){
     if(f.st==='アップ'&&x.d)return false;if(f.st==='ダウン'&&!x.d)return false;if(f.st==='凍結'&&!x.fz)return false;
     if(f.cls&&clsOf(x)!==f.cls)return false;
     if(f.col&&x.c.color!==f.col)return false;
-    if(f.guard&&!/【ガード】/.test(String(x.c.text||'').concat(x.c.text||'')))return false;
+    if(f.guard&&(/【ガード】/.test(String(x.c.text||''))===!!f.neg))return false;
+    if(f.hasCol&&(String(x.c.color||'').includes(f.hasCol)!==f.has))return false;
     if(f.other&&ctx.src&&x.u===ctx.src.u)return false;
   }
   return true;
@@ -394,7 +426,7 @@ function relocate(u,to,pos){
   if(pos==='top')P[to].unshift(x);else P[to].push(x);
   log(NM[p]+'：'+x.c.name+'　'+Z[k]+'→'+Z[to]);
 }
-const OPLBL={grant:'能力付与',awaken:'覚醒',freeze:'凍結',nulltarget:'能力を失わせる',banish:'バニッシュ',bounce:'手札に戻す',down:'ダウン',up:'アップ',downfreeze:'ダウンして凍結',trash:'トラッシュへ',toener:'エナゾーンへ',deckbottom:'デッキの一番下へ',tohand:'手札に加える',play:'場に出す',power:'パワー変更',noattack:'アタック不可',grantkw:'能力付与'};
+const OPLBL={tohand_or_play:'手札に加える／場に出す',negateattack:'次のアタックを無効',grant:'能力付与',awaken:'覚醒',freeze:'凍結',nulltarget:'能力を失わせる',banish:'バニッシュ',bounce:'手札に戻す',down:'ダウン',up:'アップ',downfreeze:'ダウンして凍結',trash:'トラッシュへ',toener:'エナゾーンへ',deckbottom:'デッキの一番下へ',tohand:'手札に加える',play:'場に出す',power:'パワー変更',noattack:'アタック不可',grantkw:'能力付与'};
 function doOp(op,x,st,ctx){
   switch(op){
     case 'banish':relocate(x.u,'ener');break;
@@ -405,8 +437,9 @@ function doOp(op,x,st,ctx){
     case 'down':x.d=1;log(x.c.name+'：ダウン');break;
     case 'up':x.d=0;log(x.c.name+'：アップ');break;
     case 'downfreeze':x.d=1;x.fz=1;log(x.c.name+'：ダウン・凍結');break;
-    case 'power':x.pm=(x.pm||0)+st.v;log(x.c.name+'：パワー'+(st.v>0?'+':'')+st.v);break;
-    case 'grant':{const g=ABIL.parseCard(String(st.text).replace(/。$/,''));g.forEach(a=>{if(a.kind==='常'&&/アタックできない/.test(a.body))x.na=1});x.ga=(x.ga||[]).concat(g.filter(a=>a.kind!=='常'));log(x.c.name+'：能力を得る『'+String(st.text).slice(0,24)+'』');break}
+    case 'power':if(st.dur==='nextopp'){x.pmx=(x.pmx||[]).concat({v:st.v,until:S.turn+1})}else x.pm=(x.pm||0)+st.v;log(x.c.name+'：パワー'+(st.v>0?'+':'')+st.v);break;
+    case 'negateattack':x.nega=1;log(x.c.name+'：次のアタックを無効にする');break;
+    case 'grant':{const g=ABIL.parseCard(String(st.text).replace(/。$/,''));g.forEach(a=>{a._until=S.turn+(st.dur==='nextopp'?1:0);if(a.kind==='常'&&/アタックできない/.test(a.body))x.na=1});x.ga=(x.ga||[]).concat(g.filter(a=>a.kind!=='常'));log(x.c.name+'：能力を得る『'+String(st.text).slice(0,24)+'』');break}
     case 'awaken':x.aw=1;log(x.c.name+'：覚醒');break;
     case 'freeze':x.fz=1;log(x.c.name+'：凍結');break;
     case 'nulltarget':x.nl=1;log(x.c.name+'：能力を失う');break;
@@ -428,13 +461,27 @@ async function execStep(st,ctx){
     case 'kw':return true;
     case 'draw':{const n=draw(ctx.p,st.n);log(NM[ctx.p]+'：'+n+'枚ドロー');return n>0}
     case 'enecharge':{let k=0;for(;k<st.n&&P.deck.length;k++)P.ener.push(P.deck.shift());log(NM[ctx.p]+'：エナチャージ'+k);return k>0}
-    case 'mill':{const T=st.who==='opp'?O:P,w=st.who==='opp'?1-ctx.p:ctx.p;let k=0;for(;k<st.n&&T.deck.length;k++)T.trash.push(T.deck.shift());log(NM[w]+'：デッキ上'+k+'枚をトラッシュへ');return k>0}
+    case 'mill':{
+      let ws=st.who==='opp'?[1-ctx.p]:st.who==='both'?[ctx.p,1-ctx.p]:st.who==='choose'?[await choose('デッキ上'+st.n+'枚をトラッシュに置くプレイヤー',['あなた','対戦相手'])?1-ctx.p:ctx.p]:[ctx.p],t=0;
+      for(const w of ws){const T=S.P[w];let k=0;for(;k<st.n&&T.deck.length;k++)T.trash.push(T.deck.shift());log(NM[w]+'：デッキ上'+k+'枚をトラッシュへ');t+=k}
+      return t>0;
+    }
+    case 'crush':crushN(1-ctx.p,st.n,true);return true;
+    case 'peek':{const x=P.deck[0];if(!x)return false;alert(NM[ctx.p]+'：デッキの一番上を見る\n『'+x.c.name+'』（'+x.c.type+(x.c.level?' Lv'+x.c.level:'')+'）');ctx.prev=[x];return true}
+    case 'powerall':['s0','s1','s2'].forEach(z=>{const x=topc(ctx.p,z);if(x)doOp('power',x,st,ctx)});return true;
+    case 'barrier':{const k=st.kind==='ルリグ'?'lbar':'sbar';P[k]=(P[k]||0)+st.n;log(NM[ctx.p]+'：【'+st.kind+'バリア】'+st.n+'つを得る');return true}
+    case 'trashener':{const E2=O.ener;if(!E2.length)return false;const n=Math.min(st.n,E2.length);const ch=await pick(NM[1-ctx.p]+'：トラッシュに置く自分のエナ',E2,n,false);ch.forEach(x=>relocate(x.u,'trash'));return ch.length>0}
     case 'settarget':{const tg=await resolveTarget(st.target,ctx,'対象を選ぶ（'+ctx.src.c.name+'）');if(!tg||!tg.length)return false;ctx.prev=tg;return true}
     case 'optcost':{
       if(st.discard){
         const H=P.hand.filter(x=>!st.f||fmatch(x,st.f));if(H.length<st.discard)return false;
         if(!confirm(ctx.src.c.name+'：手札を'+st.discard+'枚捨てますか？'))return false;
         const ch=await pick('捨てる手札を選ぶ',H,st.discard,false);ch.forEach(x=>relocate(x.u,'trash'));log(NM[ctx.p]+'：手札'+ch.length+'枚を捨てる（コスト）');return true;
+      }
+      if(st.zone==='ener'){
+        const L=P.ener.filter(x=>!st.f||fmatch(x,st.f));if(L.length<st.n)return false;
+        if(!confirm(ctx.src.c.name+'：エナゾーンから'+st.n+'枚をトラッシュに置きますか？'))return false;
+        const ch=await pick('トラッシュに置くエナを選ぶ',L,st.n,false);ch.forEach(x=>relocate(x.u,'trash'));return true;
       }
       if(st.ener){
         if(!confirm(ctx.src.c.name+'：コスト（'+Object.keys(st.ener).map(c=>c+'×'+st.ener[c]).join(' ')+'）を支払いますか？'))return false;
@@ -499,7 +546,11 @@ async function execStep(st,ctx){
       else tg=st.ref==='self'?[ctx.src]:(ctx.prev||[]);
       if(!tg||!tg.length)return false;
       ctx.prev=tg;
-      for(const x of tg){if(st.op==='play')await playTo(ctx.p,x);else doOp(st.op,x,st,ctx)}
+      for(const x of tg){
+        if(st.op==='play')await playTo(ctx.p,x);
+        else if(st.op==='tohand_or_play'){if(await choose(x.c.name,['手札に加える','場に出す']))await playTo(ctx.p,x);else relocate(x.u,'hand')}
+        else doOp(st.op,x,st,ctx);
+      }
       return true;
     }
   }
