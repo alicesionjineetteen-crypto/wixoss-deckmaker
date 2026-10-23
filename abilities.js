@@ -32,15 +32,27 @@ function classify(p){
   if(m=/^【ライフバースト】[：:]?(.*)$/.exec(p))return{kind:'LB',cost:{},body:m[1],raw:p};
   if(m=/^【(出|自|起|常)】((?:《[^》]*》)*)([^：]*)：(.*)$/.exec(p)){
     const a={kind:m[1],cost:parseCost(m[2],m[3]),body:m[4],raw:p};
-    if(m[1]==='自'){const t=/^(.+?(?:とき|時))、(.+)$/.exec(m[4]);if(t){a.trigger=trigKey(t[1]);a.trigText=t[1];a.body=t[2]}}
+    if(m[1]==='自'){const t=/^(.+?(?:とき|時))、(.+)$/.exec(m[4]);if(t){const tk=trigKey(t[1]);a.trigger=tk.key;a.trigArg=tk.arg;a.trigText=t[1];a.body=t[2]}}
     return a;
   }
   if(m=/^【(使用条件|ガード|チーム|絆常|ライズ|クラフト)】(.*)$/.exec(p))return{kind:m[1],cost:{},body:m[2],raw:p};
   return{kind:'効果',cost:{},body:p,raw:p};   // 接頭辞なし(スペル/アーツ本文)
 }
-const TRIG=[[/^このシグニがアタックしたとき$/,'self_attack'],[/^このルリグがアタックしたとき$/,'self_attack'],[/^あなたのアタックフェイズ開始時$/,'ap_start_me'],[/^各アタックフェイズ開始時$/,'ap_start_any'],
-  [/^あなたのターン終了時$/,'end_me'],[/^ターン終了時$/,'end_any'],[/^このシグニがバニッシュされたとき$/,'self_banished'],[/^あなたのエナフェイズ開始時$/,'enaph_start_me']];
-function trigKey(t){for(const[re,k]of TRIG)if(re.test(t))return k;return 'other'}
+const TRIG=[
+  [/^このシグニがアタックしたとき$/,'self_attack'],[/^このルリグがアタックしたとき$/,'self_attack'],
+  [/^あなたのアタックフェイズ開始時$/,'ap_start_me'],[/^各アタックフェイズ開始時$/,'ap_start_any'],[/^対戦相手のアタックフェイズ開始時$/,'ap_start_opp'],
+  [/^あなたのターン終了時$/,'end_me'],[/^ターン終了時$/,'end_any'],[/^対戦相手のターン終了時$/,'end_opp'],
+  [/^あなたのメインフェイズ開始時$/,'main_start_me'],[/^あなたのエナフェイズ開始時$/,'enaph_start_me'],
+  [/^このシグニがバニッシュされたとき$/,'self_banished'],[/^このシグニが場を離れたとき$/,'self_leave'],
+  [/^あなたがスペルを使用したとき$/,'spell_me'],
+  [/^このシグニがバトルによって(?:対戦相手の)?シグニ\d+体をバニッシュしたとき$/,'self_battle_banish'],
+  [/^あなたのルリグ\d+体がアタックしたとき$/,'my_lrig_attack'],
+  [/^あなたのシグニ\d+体がアタックしたとき$/,'my_signi_attack'],
+  [/^あなたの＜([^＞]+)＞のシグニ\d+体がアタックしたとき$/,'my_signi_attack',m=>({cls:m[1]})],
+  [/^あなたのシグニ\d+体が場に出たとき$/,'my_signi_enter'],
+  [/^あなたの(他の)?＜([^＞]+)＞のシグニ\d+体が場に出たとき$/,'my_signi_enter',m=>({cls:m[2],other:!!m[1]})]
+];
+function trigKey(t){for(const[re,k,fn]of TRIG){const m=re.exec(t);if(m)return{key:k,arg:fn?fn(m):null}}return{key:'other',arg:null}}
 function parseCost(tokens,extra){
   const c={};let m;
   const re=/《([^》]*)》|\[([白赤青緑黒無])\]/g;

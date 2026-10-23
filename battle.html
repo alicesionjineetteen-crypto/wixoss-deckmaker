@@ -172,7 +172,7 @@ function next(){
     if(R()&&P.hand.length>6){alert('手札が'+P.hand.length+'枚です。6枚になるまでトラッシュへ送ってください');return}
     snap();
     enqueue(async()=>{
-      await fireAll('end_me',S.cur);await fireAll('end_any');
+      await fireAll('end_me',S.cur);await fireAll('end_opp',1-S.cur);await fireAll('end_any');
       S.P.forEach(Q=>{Q.shield=[];['s0','s1','s2','lrig'].forEach(k=>Q[k].forEach(x=>{x.pm=0;x.k=[];x.na=0;x.nl=0;x.nega=0;x.ga=(x.ga||[]).filter(a=>a._until>S.turn);x.pmx=(x.pmx||[]).filter(e=>e.until>S.turn)}))});
       S.turn++;S.cur=1-S.cur;startTurn();
     });return;
@@ -180,7 +180,8 @@ function next(){
   snap();
   if(S.ph===4&&S.turn===1&&R()){S.ph=9;log('先攻1ターン目：アタックフェイズをスキップ')}
   else S.ph++;
-  if(S.ph===5)enqueue(async()=>{await fireAll('ap_start_me',S.cur);await fireAll('ap_start_any')});
+  if(S.ph===4)enqueue(async()=>{await fireAll('main_start_me',S.cur)});
+  if(S.ph===5)enqueue(async()=>{await fireAll('ap_start_me',S.cur);await fireAll('ap_start_opp',1-S.cur);await fireAll('ap_start_any')});
   save();render();
 }
 const A={
@@ -234,6 +235,7 @@ function hasKw(x,k){
 }
 function banish(p,k,toTrash){
   const P=S.P[p],x=P[k].pop();x.d=0;x.pm=0;x.k=[];
+  enqueue(async()=>{await fireTrig('self_banished',p,x);await fireTrig('self_leave',p,x)});
   P[toTrash?'trash':'ener'].push(x);
   log(NM[p]+'：'+x.c.name+' バニッシュ→'+(toTrash?'トラッシュ':'エナゾーン'));
 }
@@ -263,6 +265,7 @@ function attack(u){
   snap();x.d=1;log(NM[p]+'：'+x.c.name+' でアタック');
   enqueue(async()=>{
     await fireTrig('self_attack',p,x);
+    for(const z of['lrig','s0','s1','s2']){const y=topc(p,z);if(y&&y.u!==x.u)await fireTrig(k==='lrig'?'my_lrig_attack':'my_signi_attack',p,y,x)}
     const f2=find(u);if(!f2||S.over!=null)return;
     if(x.nega){x.nega=0;log(x.c.name+'：アタックは無効になった');return}
     const k2=f2[1];
@@ -272,7 +275,7 @@ function attack(u){
       if(f.length&&!hasKw(x,'アサシン')){
         const d=f[f.length-1],a=pw(x),b=pw(d),L=hasKw(x,'ランサー')||hasKw(x,'Sランサー'),sh=hasKw(x,'シュート');
         log('バトル：'+a+' vs '+b+(a>=b?'（アタックした側の勝ち）':'（変化なし）'));
-        if(a>=b){banish(o,z,sh);if(L)crushN(o,1)}
+        if(a>=b){banish(o,z,sh);await fireTrig('self_battle_banish',p,x);if(L)crushN(o,1)}
       }else dmg(o,hasKw(x,'ダブルクラッシュ')?2:1,false,'シグニ');
     }
   });
@@ -429,7 +432,7 @@ function relocate(u,to,pos){
 const OPLBL={tohand_or_play:'手札に加える／場に出す',negateattack:'次のアタックを無効',grant:'能力付与',awaken:'覚醒',freeze:'凍結',nulltarget:'能力を失わせる',banish:'バニッシュ',bounce:'手札に戻す',down:'ダウン',up:'アップ',downfreeze:'ダウンして凍結',trash:'トラッシュへ',toener:'エナゾーンへ',deckbottom:'デッキの一番下へ',tohand:'手札に加える',play:'場に出す',power:'パワー変更',noattack:'アタック不可',grantkw:'能力付与'};
 function doOp(op,x,st,ctx){
   switch(op){
-    case 'banish':relocate(x.u,'ener');break;
+    case 'banish':{const f=find(x.u);relocate(x.u,'ener');if(f)enqueue(async()=>{await fireTrig('self_banished',f[0],x);await fireTrig('self_leave',f[0],x)});break}
     case 'bounce':case 'tohand':relocate(x.u,'hand');break;
     case 'trash':relocate(x.u,'trash');break;
     case 'toener':relocate(x.u,'ener');break;
@@ -589,6 +592,9 @@ async function payAbilityCost(a,ctx,optional,idx){
   if(c.once)x.o[key]=c.once[0]==='T'?S.turn:true;
   return true;
 }
+async function fireWatchers(p,x){
+  for(const z of['s0','s1','s2']){const y=topc(p,z);if(y)await fireTrig('my_signi_enter',p,y,x)}
+}
 async function fireETB(p,x){
   if(x.noetb){x.noetb=0;return}
   const A=abil(x);
@@ -597,6 +603,7 @@ async function fireETB(p,x){
     if(!(await payAbilityCost(a,{p,src:x},true,i)))continue;
     await runAbility(a,{p,src:x,prev:[],manual:[]});
   }
+  await fireWatchers(p,x);
 }
 async function fireLB(p,x){
   const A=abil(x).filter(a=>a.kind==='LB');if(!A.length)return;
@@ -605,11 +612,13 @@ async function fireLB(p,x){
 }
 async function fireSpell(p,x,bet){
   for(const a of abil(x).filter(a=>a.kind==='効果'))await runAbility(a,{p,src:x,prev:[],manual:[],bet});
+  if(x.c.type==='スペル')await fireAll('spell_me',p);
 }
-async function fireTrig(key,p,x){
+async function fireTrig(key,p,x,entry){
   const A=abil(x);
   for(let i=0;i<A.length;i++){
     const a=A[i];if(a.kind!=='自'||a.trigger!==key)continue;
+    if(a.trigArg&&entry){if(a.trigArg.cls&&clsOf(entry)!==a.trigArg.cls)continue;if(a.trigArg.other&&entry.u===x.u)continue}
     if(!(await payAbilityCost(a,{p,src:x},false,i)))continue;
     await runAbility(a,{p,src:x,prev:[],manual:[]});
   }
