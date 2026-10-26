@@ -173,7 +173,7 @@ function next(){
     snap();
     enqueue(async()=>{
       await fireAll('end_me',S.cur);await fireAll('end_opp',1-S.cur);await fireAll('end_any');
-      S.P.forEach(Q=>{Q.shield=[];['s0','s1','s2','lrig'].forEach(k=>Q[k].forEach(x=>{x.pm=0;x.k=[];x.na=0;x.nl=0;x.nega=0;x.ga=(x.ga||[]).filter(a=>a._until>S.turn);x.pmx=(x.pmx||[]).filter(e=>e.until>S.turn)}))});
+      S.P.forEach(Q=>{Q.shield=[];Q.cc=null;Q.atkneg=0;Q.sacap=null;Q.sacnt=0;['s0','s1','s2','lrig'].forEach(k=>Q[k].forEach(x=>{x.pm=0;x.k=[];x.na=0;x.nl=0;x.nega=0;x.ga=(x.ga||[]).filter(a=>a._until>S.turn);x.pmx=(x.pmx||[]).filter(e=>e.until>S.turn)}))});
       S.turn++;S.cur=1-S.cur;startTurn();
     });return;
   }
@@ -225,8 +225,13 @@ function staticPower(x){
   }
   return v;
 }
+function staticKw(x,k){
+  const f=find(x.u);if(!f||!/^s\d$/.test(f[1]))return false;
+  return abil(x).some(a=>a.static&&a.static.kw===k&&!(a.static.turn==='自分ターン'&&f[0]!==S.cur)&&!(a.static.turn==='相手ターン'&&f[0]===S.cur)&&staticOk(a.static.cond,x,f[0],f[1]));
+}
 function hasKw(x,k){
   if(x.nl)return false;
+  if(staticKw(x,k))return true;
   if((x.k||[]).includes(k))return true;
   return String(x.c.text||'').split('<br>').some(t=>{
     t=t.replace(/^【常】[^：]*：/,'');
@@ -242,6 +247,7 @@ function banish(p,k,toTrash){
 function crushN(p,n,soft){
   const P=S.P[p];
   for(let i=0;i<n;i++){
+    if(P.cc){if(P.cc.used>=P.cc.cap){log(NM[p]+'：ライフクロスはクラッシュされない（効果）');return}P.cc.used++}
     if(!P.life.length){if(soft)return;S.over=1-p;log(NM[p]+'：ライフクロス0でダメージ→'+NM[1-p]+'の勝利');alert('勝者：'+NM[1-p]);return}
     const x=P.life.shift();x.f=0;P.ener.push(x);
     log(NM[p]+'：クラッシュ '+x.c.name+'（チェックゾーン→エナゾーン'+(x.c.burst?'・ライフバースト':'')+'）');
@@ -262,12 +268,16 @@ function attack(u){
   if(p!==S.cur||S.ph!==(k==='lrig'?8:7)){alert(k==='lrig'?'自分のルリグアタックステップではありません':'自分のシグニアタックステップではありません');return}
   if(x.d){alert('ダウンしているためアタックできません');return}
   if(x.na){alert('このカードは効果でアタックできません');return}
+  if(k!=='lrig'&&P.sacap!=null&&(P.sacnt||0)>=P.sacap){alert('このターンはシグニでこれ以上アタックできません（効果）');return}
+  if(k!=='lrig'&&P.zblock&&S.turn<=P.zblock.until&&P.zblock.z===k){alert('このシグニゾーンのシグニはアタックできません（効果）');return}
+  if(k!=='lrig')P.sacnt=(P.sacnt||0)+1;
   snap();x.d=1;log(NM[p]+'：'+x.c.name+' でアタック');
   enqueue(async()=>{
     await fireTrig('self_attack',p,x);
     for(const z of['lrig','s0','s1','s2']){const y=topc(p,z);if(y&&y.u!==x.u)await fireTrig(k==='lrig'?'my_lrig_attack':'my_signi_attack',p,y,x)}
     const f2=find(u);if(!f2||S.over!=null)return;
     if(x.nega){x.nega=0;log(x.c.name+'：アタックは無効になった');return}
+    if((S.P[o].atkneg||0)>0){S.P[o].atkneg--;log(x.c.name+'：アタックは無効になった（効果）');return}
     const k2=f2[1];
     if(k2==='lrig')dmg(o,1,true,'ルリグ');
     else{
@@ -474,6 +484,45 @@ async function execStep(st,ctx){
     case 'powerall':['s0','s1','s2'].forEach(z=>{const x=topc(ctx.p,z);if(x)doOp('power',x,st,ctx)});return true;
     case 'barrier':{const k=st.kind==='ルリグ'?'lbar':'sbar';P[k]=(P[k]||0)+st.n;log(NM[ctx.p]+'：【'+st.kind+'バリア】'+st.n+'つを得る');return true}
     case 'trashener':{const E2=O.ener;if(!E2.length)return false;const n=Math.min(st.n,E2.length);const ch=await pick(NM[1-ctx.p]+'：トラッシュに置く自分のエナ',E2,n,false);ch.forEach(x=>relocate(x.u,'trash'));return ch.length>0}
+    case 'grantblock':{
+      const lr=topc(ctx.p,'lrig');if(!lr)return false;
+      if(st.recollect){
+        const n=P.lrigtrash.filter(x=>x.c.type==='アーツ').length;
+        if(!confirm('リコレクト［'+st.recollect+'枚以上］：ルリグトラッシュのアーツは'+n+'枚です。条件を満たしますか？（OK＝満たす）'))return false;
+      }
+      st.abilities.forEach(a=>{const g=Object.assign({},a,{_until:S.turn});lr.ga=(lr.ga||[]).concat(g)});
+      log(NM[ctx.p]+'：'+lr.c.name+' が能力を得る（'+st.abilities.length+'つ）');return true;
+    }
+    case 'unlessdiscard':{
+      const Q2=O,n=st.n;
+      if(Q2.hand.length>=n&&confirm('対戦相手：手札を'+n+'枚捨てて効果を防ぎますか？（OK＝捨てる／キャンセル＝捨てない）')){
+        const ch=await pick('捨てる手札を選ぶ（'+NM[1-ctx.p]+'）',Q2.hand,n,false);ch.forEach(x=>relocate(x.u,'trash'));log(NM[1-ctx.p]+'：手札'+n+'枚を捨てて効果を防いだ');return false;
+      }
+      return true;
+    }
+    case 'downpair':{
+      const sg=cands({who:'opp',zone:'field',type:'シグニ',f:[],n:1},ctx);if(!sg.length)return false;
+      const a=sg.length===1?sg[0]:(await pick('ダウンさせる対戦相手のシグニ',sg,1,false))[0];
+      const lr=topc(1-ctx.p,'lrig');a.d=1;if(lr&&num(lr.c.level)===num(a.c.level))lr.d=1;
+      log(a.c.name+(lr&&num(lr.c.level)===num(a.c.level)?'と対戦相手のルリグをダウン':'をダウン（同レベルのルリグなし）'));return true;
+    }
+    case 'discardcolors':{
+      const H=O.hand;if(!H.length)return false;let k=0;
+      for(const col of['白','赤','青','緑','黒']){
+        const c=H.filter(x=>String(x.c.color||'').includes(col));if(!c.length)continue;
+        const ch=await pick('対戦相手の手札：'+col+'のカードを最大1枚選んで捨てさせる',c,1,true);ch.forEach(x=>{relocate(x.u,'trash');k++});
+      }
+      log('対戦相手の手札を'+k+'枚捨てさせた');return true;
+    }
+    case 'declare':{const i=await choose('宣言する数字',['0','1','2','3','4','5']);ctx.dnum=i;log(NM[ctx.p]+'：数字'+i+'を宣言');return true}
+    case 'nullbylevel':{if(ctx.dnum==null)return false;let k=0;for(const o of[0,1])if(o!==ctx.p||true){['lrig','s0','s1','s2'].forEach(z=>{const x=topc(1-ctx.p,z);if(x&&num(x.c.level)===ctx.dnum&&!x.nl){x.nl=1;k++}});break}log('宣言した数字'+ctx.dnum+'と同じレベルの対戦相手のカード'+k+'枚が能力を失う');return true}
+    case 'crushcap':P.cc={cap:st.n,used:0};log(NM[ctx.p]+'：このターンのクラッシュは合計'+st.n+'枚まで');return true;
+    case 'negatenext':P.atkneg=st.n;log(NM[ctx.p]+'：対戦相手の次の'+st.n+'回のアタックを無効にする');return true;
+    case 'sacap':O.sacap=st.n;O.sacnt=0;log('対戦相手はこのターンシグニで合計'+st.n+'回しかアタックできない');return true;
+    case 'downsame':{const lv=topc(1-ctx.p,'lrig')?num(topc(1-ctx.p,'lrig').c.level):-1;let k=0;['s0','s1','s2'].forEach(z=>{const x=topc(1-ctx.p,z);if(x&&num(x.c.level)===lv){x.d=1;k++}});log('対戦相手のレベル'+lv+'のシグニ'+k+'体をダウン');return true}
+    case 'selectzone':{const i=await choose('対戦相手のシグニゾーンを指定',['左','中','右']);ctx.zone='s'+i;return true}
+    case 'blockzone':{if(!ctx.zone)return false;O.zblock={z:ctx.zone,until:S.turn+1};log('対戦相手は次のターン '+Z[ctx.zone]+' のシグニでアタックできない');return true}
+    case 'noauto':O.noauto=S.turn+1;log('対戦相手のシグニの【自】能力は発動しない（このターンと次のターン）');return true;
     case 'settarget':{const tg=await resolveTarget(st.target,ctx,'対象を選ぶ（'+ctx.src.c.name+'）');if(!tg||!tg.length)return false;ctx.prev=tg;return true}
     case 'optcost':{
       if(st.discard){
@@ -521,7 +570,7 @@ async function execStep(st,ctx){
     case 'look':{
       const D=P.deck;if(!D.length)return false;
       const n=Math.min(st.n,D.length),top=D.slice(0,n);let pool=[...top];
-      const lfm=(x,f)=>fmatch(x,f)&&(!f.lv||cmp(num(x.c.level),f.lv))&&(!f.col||(topc(ctx.p,'lrig')&&x.c.color===topc(ctx.p,'lrig').c.color));
+      const lfm=(x,f)=>fmatch(x,f)&&(!f.lv||cmp(num(x.c.level),f.lv))&&(!f.col||(f.col==='common'?(topc(ctx.p,'lrig')&&x.c.color===topc(ctx.p,'lrig').c.color):String(x.c.color||'').includes(f.col)));
       let chosen=0;
       for(const pk of st.picks){
         const cand=pool.filter(x=>lfm(x,pk.f));
@@ -532,7 +581,7 @@ async function execStep(st,ctx){
           pool.splice(pool.indexOf(x),1);chosen++;
           let to=pk.to;
           if(to==='hand_or_field')to=(await choose(x.c.name,['手札に加える','場に出す']))?'field':'hand';
-          if(to==='field')await playTo(ctx.p,x);else if(to==='top')relocate(x.u,'deck','top');else relocate(x.u,to);
+          if(to==='field')await playTo(ctx.p,x);else if(to==='top')relocate(x.u,'deck','top');else if(to==='bottom')relocate(x.u,'deck');else relocate(x.u,to);
         }
       }
       if(st.rest==='ener')pool.forEach(x=>relocate(x.u,'ener'));
@@ -540,6 +589,7 @@ async function execStep(st,ctx){
       else if(st.rest==='top')[...pool].reverse().forEach(x=>relocate(x.u,'deck','top'));
       else if(st.rest==='shuffle'){shuffle(P.deck)}
       else if(st.rest==='bottom')pool.forEach(x=>relocate(x.u,'deck'));
+      else if(st.rest==='shufflebottom'){shuffle(pool);pool.forEach(x=>relocate(x.u,'deck'))}
       log(NM[ctx.p]+'：デッキ上'+n+'枚を見て'+chosen+'枚選択');return true;
     }
     default:{   // 対象を取る / それ・自身を指す操作
@@ -559,9 +609,16 @@ async function execStep(st,ctx){
   }
 }
 async function runSteps(steps,ctx){
+  const skip=new Set();
+  steps.forEach((st,i)=>{
+    if(st.bet==='replace'){if(ctx.bet){if(i>0)skip.add(i-1)}else skip.add(i)}
+    else if(st.bet==='extra'&&!ctx.bet)skip.add(i);
+  });
   let ok=true;
-  for(const st of steps){
+  for(let i=0;i<steps.length;i++){
+    const st=steps[i];
     if(S.over!=null)return false;
+    if(skip.has(i))continue;
     if(st.cond==='then'&&!ok)continue;
     ok=await execStep(st,ctx);
   }
@@ -577,11 +634,17 @@ async function payAbilityCost(a,ctx,optional,idx){
   if(c.turn==='相手ターン'&&ctx.p===S.cur)return false;
   x.o=x.o||{};const key='o'+idx;
   if(c.once&&(c.once[0]==='T'?x.o[key]===S.turn:x.o[key])){alert('この能力は使用済みです（'+(c.once[0]==='T'?'ターン':'ゲーム')+'1回）');return false}
-  const has=c.down||c.coin||c.ener||c.text;
+  const has=c.down||c.coin||c.ener||c.text||c.exceed;
   if(optional&&has&&!confirm('【'+a.kind+'】'+x.c.name+'：コストを支払って発動しますか？\n'+a.raw))return false;
   if(c.down&&x.d){alert('ダウン状態のためコストを支払えません');return false}
   if(c.coin&&(P.coin||0)<c.coin){alert('コインが足りません（必要'+c.coin+'／所持'+(P.coin||0)+'）');return false}
   if(c.ener){const ok=await new Promise(res=>payUI(ctx.p,c.ener,x.c.name+' のコスト',use=>{spend(P,use);res(true)},()=>res(false)));if(!ok)return false}
+  if(c.exceed){
+    const under=P.lrig.slice(0,-1);
+    if(under.length<c.exceed){alert('エクシード'+c.exceed+'を支払えません（ルリグの下のカード'+under.length+'枚）');return false}
+    const ch=await pick('エクシード'+c.exceed+'：ルリグトラッシュに置くルリグの下のカード',under,c.exceed,false);
+    ch.forEach(y=>relocate(y.u,'lrigtrash'));log(NM[ctx.p]+'：エクシード'+c.exceed+'を支払う');
+  }
   if(c.coin)P.coin-=c.coin;
   if(c.down)x.d=1;
   if(c.text){
@@ -618,6 +681,7 @@ async function fireTrig(key,p,x,entry){
   const A=abil(x);
   for(let i=0;i<A.length;i++){
     const a=A[i];if(a.kind!=='自'||a.trigger!==key)continue;
+    if((S.P[p].noauto||0)>=S.turn&&x.c.type==='シグニ')continue;
     if(a.trigArg&&entry){if(a.trigArg.cls&&clsOf(entry)!==a.trigArg.cls)continue;if(a.trigArg.other&&entry.u===x.u)continue}
     if(!(await payAbilityCost(a,{p,src:x},false,i)))continue;
     await runAbility(a,{p,src:x,prev:[],manual:[]});

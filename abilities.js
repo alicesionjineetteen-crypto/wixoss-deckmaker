@@ -24,7 +24,17 @@ function splitAbilities(text){
     if(/^[(（]/.test(l))continue;
     ps.push(l);
   }
-  return ps.map(classify);
+  const out=[];
+  for(let i=0;i<ps.length;i++){
+    const p0=ps[i];
+    if(/以下の能力を得る。?$/.test(p0)&&ps[i+1]&&/^『/.test(ps[i+1])){
+      const g=[];let j=i+1;
+      for(;j<ps.length;j++){g.push(ps[j].replace(/^『/,'').replace(/』$/,''));if(/』$/.test(ps[j]))break}
+      out.push({kind:'効果',cost:{},body:p0,raw:p0,granted:g});i=j;continue;
+    }
+    out.push(classify(p0));
+  }
+  return out;
 }
 function classify(p){
   let m;
@@ -65,7 +75,8 @@ function parseCost(tokens,extra){
     else if(t==='自分ターン'||t==='相手ターン')c.turn=t;
     else{const e=/^(.)×(\d+)$/.exec(t);if(e&&COL.includes(e[1])){c.ener=c.ener||{};c.ener[e[1]]=(c.ener[e[1]]||0)+num(e[2])}else if(COL.includes(t)){c.ener=c.ener||{};c.ener[t]=(c.ener[t]||0)+1}else c.other=(c.other||'')+t}
   }
-  if(extra&&extra.trim())c.text=extra.trim();   // 「手札を1枚捨てる」等の追加コスト
+  if(extra&&/^エクシード(\d+)$/.test(extra.trim()))c.exceed=num(RegExp.$1);
+  else if(extra&&extra.trim())c.text=extra.trim();   // 「手札を1枚捨てる」等の追加コスト
   return c;
 }
 
@@ -84,7 +95,7 @@ function parseTarget(str){
     else if(m=/^\[ガード\]を持(つ|たない)/.exec(t))r.f.push({guard:1,neg:m[1]==='たない'});
     else if(m=/^《([白赤青緑黒無])》を持(つ|たない)/.exec(t))r.f.push({hasCol:m[1],has:m[2]==='つ'});
     else break;
-    t=t.slice(m[0].length);
+    t=t.slice(m[0].length).replace(/^、/,'');
   }
   if(m=/^すべての(ルリグかシグニ|シグニ|ルリグ|カード)$/.exec(t)){r.type=m[1];r.all=true;return r}
   if(m=/^(ルリグかシグニ|シグニ|ルリグ|カード|スペル|アーツ|ピース)を?(\d+)(体|枚)(まで)?$/.exec(t)){r.type=m[1];r.n=num(m[2]);r.upTo=!!m[4];return r}
@@ -124,6 +135,20 @@ function parseSentence(s0){
 function sentenceCore(s,s0){
   s=s.replace(/\s*[(（][^)）]*[)）]$/,'').trim();
   let m;
+  if(m=/^(.+?)(?:を)?対象とし、対戦相手が手札を(\d+)枚捨てないかぎり、(.+)$/.exec(s)){const tg=parseTarget(m[1]),a=parseAction(m[3]);if(tg&&a)return[{op:'settarget',target:tg},{op:'unlessdiscard',n:num(m[2])},Object.assign({ref:'prev',cond:'then'},a)]}
+  if(/^対戦相手のシグニ1体と、そのシグニと同じレベルの対戦相手のルリグ1体を対象とし、それらをダウンする$/.test(s))return{op:'downpair'};
+  if(/^対戦相手の手札を見て、白と赤と青と緑と黒のカードをそれぞれ1枚まで選び、捨てさせる$/.test(s))return{op:'discardcolors'};
+  if(m=/^あなたがベットしていた場合、代わりに(.+)$/.exec(s)){const r=sentenceCore(m[1],s0);if(r&&!Array.isArray(r)&&r.op!=='manual'){r.bet='replace';return r}}
+  if(m=/^あなたがベットしていた場合、(.+)$/.exec(s)){const r=sentenceCore(m[1],s0);if(r&&!Array.isArray(r)&&r.op!=='manual'){r.bet='extra';return r}}
+  if(/^(?:0[~～]5の)?数字1つを宣言する$/.test(s))return{op:'declare'};
+  if(/^ターン終了時まで、宣言された数字と同じレベルの対戦相手のすべてのルリグとシグニは能力を失う$/.test(s))return{op:'nullbylevel'};
+  if(m=/^このターンのシグニアタックステップとルリグアタックステップとガードステップの間、あなたのライフクロスは合計(\d+)枚までしかクラッシュされない$/.exec(s))return{op:'crushcap',n:num(m[1])};
+  if(m=/^このターン、次(とその次)?に対戦相手のシグニかルリグ1体がアタックしたとき、そのアタックを無効にする$/.exec(s))return{op:'negatenext',n:m[1]?2:1};
+  if(/^このターン、対戦相手はシグニで合計一度しかアタックできない$/.test(s))return{op:'sacap',n:1};
+  if(/^対戦相手のセンタールリグと同じレベルの対戦相手のすべてのシグニをダウンする$/.test(s))return{op:'downsame'};
+  if(/^対戦相手のシグニゾーン1つを指定する$/.test(s))return{op:'selectzone'};
+  if(/^次の対戦相手のターンの間、対戦相手はそのシグニゾーンにあるシグニでアタックできない$/.test(s))return{op:'blockzone'};
+  if(/^このターンと次のターンの間、対戦相手のシグニの【自】能力は発動しない$/.test(s))return{op:'noauto'};
   if(m=/^(.+?)(?:を)?対象とし、(.+)$/.exec(s)){
     const tg=parseTarget(m[1]);
     if(tg){const a=parseAction(m[2]);if(a)return Object.assign({target:tg},a)}
@@ -174,14 +199,15 @@ function sentenceCore(s,s0){
 function lookFilter(t){
   let m;
   if(t==='カード')return{};if(t==='シグニ')return{type:'シグニ'};if(t==='スペル')return{type:'スペル'};
+  if(m=/^(白|赤|青|緑|黒|無)(?:色)?のカード$/.exec(t))return{col:m[1]};
   if(m=/^＜([^＞]+)＞のシグニ$/.exec(t))return{type:'シグニ',cls:m[1]};
   if(m=/^＜([^＞]+)＞のカード$/.exec(t))return{cls:m[1]};
   if(m=/^レベル(\d+)(以下)?の(シグニ|カード)$/.exec(t))return{type:m[3]==='シグニ'?'シグニ':undefined,lv:[m[2]?'<=':'=',num(m[1])]};
   if(m=/^あなたの(?:場にいる|センター)ルリグと共通する色を持つ(カード|シグニ)$/.exec(t))return{type:m[1]==='シグニ'?'シグニ':undefined,col:'common'};
   return null;
 }
-const LOOKTO={'手札に加えるか場に出し':'hand_or_field','手札に加え':'hand','場に出し':'field','エナゾーンに置き':'ener','トラッシュに置き':'trash','デッキの一番上に戻し':'top'};
-const LOOKREST={'好きな順番でデッキの一番下に置く':'bottom','エナゾーンに置く':'ener','トラッシュに置く':'trash','デッキに加えてシャッフルする':'shuffle','好きな順番でデッキの一番上に戻す':'top'};
+const LOOKTO={'好きな順番でデッキの一番下に置き':'bottom','手札に加えるか場に出し':'hand_or_field','手札に加え':'hand','場に出し':'field','エナゾーンに置き':'ener','トラッシュに置き':'trash','デッキの一番上に戻し':'top'};
+const LOOKREST={'シャッフルしてデッキの一番下に置く':'shufflebottom','好きな順番でデッキの一番下に置く':'bottom','エナゾーンに置く':'ener','トラッシュに置く':'trash','デッキに加えてシャッフルする':'shuffle','好きな順番でデッキの一番上に戻す':'top'};
 // 「その中から…」→ picks[]・rest。解釈できない句があれば null
 function parseLookPicks(sent){
   const m=/^その中から(.+)$/.exec(sent);if(!m)return null;
@@ -189,8 +215,9 @@ function parseLookPicks(sent){
   for(const c of m[1].split('、')){
     let r;
     if(r=/^残りを(.+)$/.exec(c)){if(!(r[1] in LOOKREST))return null;rest=LOOKREST[r[1]];continue}
+    if(r=/^(.+?)を(\d+)枚(まで)?と$/.exec(c)){const f0=lookFilter(r[1]);if(!f0)return null;picks.push({f:f0,pick:num(r[2]),upTo:!!r[3],reveal:false,to:null});continue}
     r=/^(.+?)(?:を)?(?:(\d+)枚(まで)?|好きな枚数)を?(公開し)?(手札に加えるか場に出し|手札に加え|場に出し|エナゾーンに置き|トラッシュに置き|デッキの一番上に戻し)$/.exec(c);
-    if(!r)r=/^(好きな枚数の)(.+?)を?(公開し)?(手札に加え|エナゾーンに置き|トラッシュに置き)$/.exec(c);
+    if(!r)r=/^(好きな枚数の)(.+?)を?(公開し)?(手札に加え|エナゾーンに置き|トラッシュに置き|好きな順番でデッキの一番下に置き)$/.exec(c);
     if(!r)return null;
     let f,pick,upTo,rev,to;
     if(r[1]==='好きな枚数の'){f=lookFilter(r[2]);pick=99;upTo=true;rev=!!r[3];to=r[4]}
@@ -198,6 +225,7 @@ function parseLookPicks(sent){
     if(!f)return null;
     picks.push({f,pick,upTo,reveal:rev,to:LOOKTO[to]});
   }
+  for(let i=picks.length-1;i>=0;i--)if(!picks[i].to)picks[i].to=(picks[i+1]&&picks[i+1].to)||'hand';
   return picks.length?{picks,rest}:null;
 }
 function parseBody(body){
@@ -235,6 +263,10 @@ function parseCondS(t){
 }
 function parseStatic(a){
   let m;const b=a.body.replace(/。$/,'');
+  if(m=/^(?:(.+?)かぎり、)?このシグニのパワーは([+-]\d+)され、このシグニは【(アサシン|ランサー|Sランサー|ダブルクラッシュ|シュート)[^】]*】を得る$/.exec(b)){
+    const cond=m[1]?parseCondS(m[1]):{t:'always'};
+    if(cond)return{type:'power',v:num(m[2]),kw:m[3],cond,turn:a.cost&&a.cost.turn||''};
+  }
   if(m=/^(?:(.+?)かぎり、)?このシグニのパワーは([+-]\d+)される$/.exec(b)){
     const cond=m[1]?parseCondS(m[1]):{t:'always'};
     if(cond)return{type:'power',v:num(m[2]),cond,turn:a.cost&&a.cost.turn||''};
@@ -243,6 +275,7 @@ function parseStatic(a){
 }
 function parseCard(text){
   return splitAbilities(text).map(a=>{
+    if(a.granted){const mm=/^《リコレクトアイコン》［(\d+)枚以上］/.exec(a.body);const ab=[];a.granted.forEach(t=>parseCard(t).forEach(x=>ab.push(x)));return Object.assign({},a,{steps:[{op:'grantblock',recollect:mm?num(mm[1]):0,abilities:ab,target:/あなたのセンタールリグ/.test(a.body)?'lrig':'lrig'}]})}
     if(a.kind==='常'){const st=parseStatic(a);if(st)return Object.assign({},a,{static:st,steps:[{op:'static'}]})}
     const steps=['LB','出','自','起','効果','常'].includes(a.kind)?parseBody(a.body):[];
     return Object.assign({},a,{steps});
