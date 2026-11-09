@@ -6,6 +6,15 @@
 
 <title>WIXOSS Deck Builder</title>
 
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2196f3" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="WIXOSSデッキ" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" type="image/png" href="icons/icon-192.png" />
+
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
 
@@ -49,9 +58,13 @@
     <h3>デッキの保存・呼び出し</h3>
 
     <input id="deck-save-name" type="text" placeholder="デッキ名を入力">
+    <input id="deck-save-tags" type="text" placeholder="タグ（カンマ区切り。例: 大会用, 練習）">
+    <textarea id="deck-save-memo" rows="3" placeholder="メモ（任意）"></textarea>
     <button id="deck-save-confirm">この内容で保存</button>
 
     <hr>
+
+    <select id="deck-tag-filter" style="display:none;"></select>
 
     <ul id="deck-list"></ul>
 
@@ -86,6 +99,7 @@
 
     <button id="export-excel-team-btn">チーム戦用シートで出力</button>
     <button id="export-excel-solo-btn">個人戦用シートで出力</button>
+    <button id="export-image-btn">デッキ画像として出力</button>
 
     <hr>
 
@@ -105,6 +119,43 @@
   <div class="modal-content preview-content">
     <img id="card-preview-img" src="" alt="カード拡大画像">
     <button id="close-card-preview">閉じる</button>
+  </div>
+</div>
+
+<div id="deck-meta-modal" class="modal">
+  <div class="modal-content">
+    <h3 id="deck-meta-title">メモ・タグ</h3>
+
+    <label for="deck-meta-tags">タグ（カンマ区切り）</label>
+    <input id="deck-meta-tags" type="text" placeholder="例: 大会用, 練習">
+
+    <label for="deck-meta-memo">メモ</label>
+    <textarea id="deck-meta-memo" rows="5"></textarea>
+
+    <button id="deck-meta-save">保存</button>
+    <button id="deck-meta-close">閉じる</button>
+  </div>
+</div>
+
+<div id="deck-image-modal" class="modal">
+  <div class="modal-content image-export-content">
+    <h3>デッキ画像の書き出し</h3>
+
+    <label for="deck-image-title">タイトル（画像の上部に表示）</label>
+    <input id="deck-image-title" type="text" placeholder="例: 白ピルルク">
+
+    <button id="deck-image-create">画像を作成</button>
+    <p id="deck-image-status" class="modal-note"></p>
+
+    <img id="deck-image-preview" alt="デッキ画像" style="display:none;">
+    <div id="deck-image-actions" style="display:none;">
+      <button id="deck-image-save">画像を保存</button>
+      <button id="deck-image-share" style="display:none;">共有</button>
+    </div>
+
+    <hr>
+
+    <button id="close-deck-image">閉じる</button>
   </div>
 </div>
 
@@ -187,11 +238,25 @@
 <h2>◆ メインデッキ（ライフバースト無）<span id="noburst-count-label" class="count-label"></span></h2>
 <div id="main-noburst" class="deck-grid"></div>
 
+<div class="undo-group">
+  <button id="undo-btn" type="button" aria-label="元に戻す" title="元に戻す" disabled>↶</button>
+  <button id="redo-btn" type="button" aria-label="やり直す" title="やり直す" disabled>↷</button>
+</div>
+
 <button id="save-btn" class="fab">💾</button>
 <button id="clear-deck-btn" class="clear-btn">🗑 空にする</button>
 <button id="stats-btn" class="export">📊</button>
 <button id="export-btn" class="export">📄</button>
 <button id="open-export-modal" class="export">🖨</button>
+
+<script>
+  // PWA: オフラインでも起動できるようにする
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(err => console.error("Service Worker の登録に失敗しました", err));
+    });
+  }
+</script>
 
 </body>
 </html>

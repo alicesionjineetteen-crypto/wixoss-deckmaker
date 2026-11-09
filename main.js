@@ -131,7 +131,9 @@ const MOVE_THRESHOLD = 8; // px
 
   // Android Chrome 等の長押しメニュー・PCの右クリックメニュー
   document.addEventListener("contextmenu", (e) => {
-    if (e.target && e.target.tagName === "IMG") e.preventDefault();
+    if (e.target && e.target.tagName === "IMG" && e.target.id !== "deck-image-preview") {
+      e.preventDefault();
+    }
   });
 
   // 画像のドラッグ開始（長押し→ドラッグ扱いになって pointercancel が飛ぶのを防ぐ）
@@ -147,6 +149,11 @@ function renderCards(cards, searched) {
   const shown = cards.slice(0, MAX_RESULTS);
 
   shown.forEach(card => {
+    // 画像＋「デッキ内の枚数」バッジを1組にして並べる
+    const wrap = document.createElement("div");
+    wrap.className = "card-wrap";
+    wrap._card = card;
+
     const img = document.createElement("img");
     img.src = card.image;
     img.className = "card-img";
@@ -154,8 +161,15 @@ function renderCards(cards, searched) {
 
     attachSearchCardEvents(img, card);
 
-    list.appendChild(img);
+    const badge = document.createElement("span");
+    badge.className = "card-badge";
+    badge.style.display = "none";
+
+    wrap.appendChild(img);
+    wrap.appendChild(badge);
+    list.appendChild(wrap);
   });
+  updateSearchBadges();
 
   if (cards.length > MAX_RESULTS) {
     const notice = document.createElement("p");
@@ -286,7 +300,9 @@ const SET_NAMES = {
 };
 
 function getSetCode(card) {
-  return String(card.id).replace(/-[^-]*$/, "");
+  const code = String(card.id).replace(/-[^-]*$/, "");
+  // SPDi01 / SPDi43 / SP38 など、SP始まりのプロモ系は「SP」にまとめる
+  return /^SP/.test(code) ? "SP" : code;
 }
 
 (function setupSetFilter() {
@@ -458,6 +474,13 @@ let lrigDeck = [];
 let mainBurst = [];
 let mainNoBurst = [];
 
+// 元に戻す／やり直す用の履歴（デッキの状態のスナップショット）
+const UNDO_LIMIT = 50;
+let undoStack = [];
+let redoStack = [];
+let lastDeckSnapshot = null;
+let restoringDeck = false;
+
 // ルリグデッキに入るカード種別
 const LRIG_DECK_TYPES = ["ルリグ", "アーツ", "ピース"];
 
@@ -487,6 +510,8 @@ function refreshDeckDisplay() {
   renderDeckArea("main-noburst", mainNoBurst);
   updateDeckCounts();
   saveCurrentDeckToStorage();
+  recordDeckHistory();
+  updateSearchBadges();
 }
 
 // =========================
@@ -843,24 +868,84 @@ function setSavedDecks(decks) {
   }
 }
 
+let deckTagFilter = "";
+
+// カンマ・読点・空白で区切ってタグの配列にする（重複は除く）
+function parseTags(str) {
+  const tags = String(str || "")
+    .split(/[,、，\s]+/)
+    .map(t => t.trim())
+    .filter(Boolean);
+  return [...new Set(tags)];
+}
+
 function renderDeckList() {
   const decks = getSavedDecks();
   const listEl = document.getElementById("deck-list");
   listEl.innerHTML = "";
 
-  const names = Object.keys(decks);
-  if (names.length === 0) {
+  // タグ絞り込みの選択肢を作り直す
+  const allTags = [...new Set(Object.values(decks).flatMap(d => d.tags || []))];
+  if (deckTagFilter && !allTags.includes(deckTagFilter)) deckTagFilter = "";
+
+  const filterEl = document.getElementById("deck-tag-filter");
+  if (filterEl) {
+    filterEl.innerHTML = "";
+    filterEl.appendChild(new Option("すべてのタグ", ""));
+    allTags.forEach(t => filterEl.appendChild(new Option(t, t)));
+    filterEl.value = deckTagFilter;
+    filterEl.style.display = allTags.length > 0 ? "" : "none";
+  }
+
+  const allNames = Object.keys(decks);
+  if (allNames.length === 0) {
     const li = document.createElement("li");
     li.textContent = "（保存されたデッキはありません）";
     listEl.appendChild(li);
     return;
   }
 
+  const names = allNames.filter(n => !deckTagFilter || (decks[n].tags || []).includes(deckTagFilter));
+  if (names.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "（このタグのデッキはありません）";
+    listEl.appendChild(li);
+    return;
+  }
+
   names.forEach(name => {
     const li = document.createElement("li");
+    const deck = decks[name];
 
     const label = document.createElement("span");
     label.textContent = name;
+    li.appendChild(label);
+
+    // タグ・メモの表示
+    const tags = deck.tags || [];
+    if (tags.length > 0 || deck.memo) {
+      const meta = document.createElement("div");
+      meta.className = "deck-meta";
+
+      tags.forEach(tag => {
+        const chip = document.createElement("small");
+        chip.className = "deck-tag";
+        chip.textContent = tag;
+        chip.onclick = () => {
+          deckTagFilter = tag;
+          renderDeckList();
+        };
+        meta.appendChild(chip);
+      });
+
+      if (deck.memo) {
+        const memo = document.createElement("div");
+        memo.className = "deck-memo";
+        memo.textContent = deck.memo;
+        meta.appendChild(memo);
+      }
+      li.appendChild(meta);
+    }
 
     const loadBtn = document.createElement("button");
     loadBtn.textContent = "読み込む";
@@ -871,7 +956,9 @@ function renderDeckList() {
     overwriteBtn.onclick = () => {
       if (confirm(`「${name}」に上書き保存します。よろしいですか？`)) {
         const d = getSavedDecks();
+        // メモ・タグは残したまま、デッキの中身だけ更新する
         d[name] = {
+          ...d[name],
           lrigDeck,
           mainBurst,
           mainNoBurst,
@@ -882,6 +969,10 @@ function renderDeckList() {
         renderDeckList();
       }
     };
+
+    const metaBtn = document.createElement("button");
+    metaBtn.textContent = "メモ・タグ";
+    metaBtn.onclick = () => openDeckMeta(name);
 
     const delBtn = document.createElement("button");
     delBtn.textContent = "削除";
@@ -894,13 +985,54 @@ function renderDeckList() {
       }
     };
 
-    li.appendChild(label);
     li.appendChild(loadBtn);
     li.appendChild(overwriteBtn);
+    li.appendChild(metaBtn);
     li.appendChild(delBtn);
     listEl.appendChild(li);
   });
 }
+
+document.getElementById("deck-tag-filter").onchange = (e) => {
+  deckTagFilter = e.target.value;
+  renderDeckList();
+};
+
+// =========================
+// メモ・タグの編集
+// =========================
+let editingMetaName = null;
+
+function openDeckMeta(name) {
+  const deck = getSavedDecks()[name];
+  if (!deck) return;
+
+  editingMetaName = name;
+  document.getElementById("deck-meta-title").textContent = `「${name}」のメモ・タグ`;
+  document.getElementById("deck-meta-tags").value = (deck.tags || []).join(", ");
+  document.getElementById("deck-meta-memo").value = deck.memo || "";
+  openModal("deck-meta-modal");
+}
+
+document.getElementById("deck-meta-save").onclick = () => {
+  const decks = getSavedDecks();
+  const deck = decks[editingMetaName];
+  if (!deck) {
+    closeModal("deck-meta-modal");
+    return;
+  }
+
+  deck.tags = parseTags(document.getElementById("deck-meta-tags").value);
+  deck.memo = document.getElementById("deck-meta-memo").value.trim();
+  setSavedDecks(decks);
+
+  closeModal("deck-meta-modal");
+  renderDeckList();
+};
+
+document.getElementById("deck-meta-close").onclick = () => {
+  closeModal("deck-meta-modal");
+};
 
 function loadDeck(name) {
   const decks = getSavedDecks();
@@ -932,16 +1064,25 @@ document.getElementById("deck-save-confirm").onclick = () => {
     return;
   }
 
+  const tagsInput = document.getElementById("deck-save-tags").value;
+  const memoInput = document.getElementById("deck-save-memo").value.trim();
+
   const decks = getSavedDecks();
+  const previous = decks[name] || {};
   decks[name] = {
     lrigDeck,
     mainBurst,
     mainNoBurst,
+    // 同名で保存し直すとき、入力欄が空なら以前のタグ・メモを引き継ぐ
+    tags: tagsInput.trim() ? parseTags(tagsInput) : (previous.tags || []),
+    memo: memoInput || previous.memo || "",
     savedAt: new Date().toISOString()
   };
   setSavedDecks(decks);
 
   document.getElementById("deck-save-name").value = "";
+  document.getElementById("deck-save-tags").value = "";
+  document.getElementById("deck-save-memo").value = "";
   renderDeckList();
   alert(`「${name}」として保存しました`);
 };
@@ -1312,6 +1453,8 @@ function loadCurrentDeckFromStorage() {
 
 loadCurrentDeckFromStorage();
 updateDeckCounts();
+lastDeckSnapshot = snapshotDeck(); // 起動時の状態を「元に戻す」の起点にする
+updateUndoButtons();
 
 // =========================
 // デッキを空にする
@@ -1475,4 +1618,460 @@ document.getElementById("stats-btn").onclick = () => {
 
 document.getElementById("close-stats").onclick = () => {
   closeModal("stats-modal");
+};
+
+
+// =========================
+// 検索結果カードの「デッキ内の枚数」バッジ
+// 同名カードの合計枚数を表示する（メイン4枚／ルリグデッキ1枚が上限）
+// =========================
+function deckCountForCard(card) {
+  if (isLrigDeckCard(card)) {
+    return countByName(lrigDeck, card.name);
+  }
+  return countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
+}
+
+function updateSearchBadges() {
+  document.querySelectorAll("#card-list .card-wrap").forEach(wrap => {
+    const card = wrap._card;
+    const badge = wrap.querySelector(".card-badge");
+    if (!card || !badge) return;
+
+    const count = deckCountForCard(card);
+    const max = isLrigDeckCard(card) ? 1 : MAX_COPIES;
+
+    badge.style.display = count > 0 ? "" : "none";
+    badge.textContent = `×${count}`;
+    badge.classList.toggle("full", count >= max);
+  });
+}
+
+// =========================
+// 元に戻す（Undo）／やり直す（Redo）
+// refreshDeckDisplay() のたびに前回との差を見て履歴に積むので、
+// 追加・削除・枚数指定・空にする・読み込みなど、すべての操作が対象になる
+// =========================
+function snapshotDeck() {
+  return {
+    lrigDeck: [...lrigDeck],
+    mainBurst: [...mainBurst],
+    mainNoBurst: [...mainNoBurst]
+  };
+}
+
+function sameCardList(a, b) {
+  return a.length === b.length && a.every((c, i) => c === b[i]);
+}
+
+function sameDeckState(a, b) {
+  return sameCardList(a.lrigDeck, b.lrigDeck) &&
+    sameCardList(a.mainBurst, b.mainBurst) &&
+    sameCardList(a.mainNoBurst, b.mainNoBurst);
+}
+
+function recordDeckHistory() {
+  const current = snapshotDeck();
+
+  if (!restoringDeck && lastDeckSnapshot && !sameDeckState(current, lastDeckSnapshot)) {
+    undoStack.push(lastDeckSnapshot);
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack = []; // 新しい操作をしたら、やり直しの履歴は破棄
+  }
+
+  lastDeckSnapshot = current;
+  updateUndoButtons();
+}
+
+function restoreDeckSnapshot(snapshot) {
+  restoringDeck = true;
+  lrigDeck = [...snapshot.lrigDeck];
+  mainBurst = [...snapshot.mainBurst];
+  mainNoBurst = [...snapshot.mainNoBurst];
+  refreshDeckDisplay();
+  restoringDeck = false;
+}
+
+function undoDeck() {
+  if (undoStack.length === 0) return;
+  redoStack.push(snapshotDeck());
+  restoreDeckSnapshot(undoStack.pop());
+}
+
+function redoDeck() {
+  if (redoStack.length === 0) return;
+  undoStack.push(snapshotDeck());
+  restoreDeckSnapshot(redoStack.pop());
+}
+
+function updateUndoButtons() {
+  const undoBtn = document.getElementById("undo-btn");
+  const redoBtn = document.getElementById("redo-btn");
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+
+document.getElementById("undo-btn").onclick = undoDeck;
+document.getElementById("redo-btn").onclick = redoDeck;
+
+// PC用ショートカット（Ctrl/Cmd+Z で元に戻す、Ctrl/Cmd+Y または Shift+Z でやり直す）
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+
+  const key = e.key.toLowerCase();
+  if (key === "z" && !e.shiftKey) {
+    e.preventDefault();
+    undoDeck();
+  } else if (key === "y" || (key === "z" && e.shiftKey)) {
+    e.preventDefault();
+    redoDeck();
+  }
+});
+
+// =========================
+// デッキ画像の書き出し（PNG）
+// カード画像を canvas に描いて1枚の画像にする。
+// 画像サーバー側が他サイトからの読み込み（CORS）を許可していない場合は、
+// そのカードだけ「カード名のタイル」で代替する。
+// 画像を確実に載せたい場合は、CARD_IMAGE_PROXY に画像中継サーバーのURLを設定する
+// （例: "https://xxxx.workers.dev/?url=" ← 末尾に元画像のURLがエンコードされて付く）
+// =========================
+const CARD_IMAGE_PROXY = "";
+
+const IMG_COLS = 10;
+const IMG_TILE_W = 150;
+const IMG_TILE_H = 210;
+const IMG_GAP = 10;
+const IMG_MARGIN = 30;
+const IMG_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif';
+
+const CARD_TILE_FILL = {
+  "白": "#f5f5f0",
+  "青": "#bbdefb",
+  "赤": "#ffcdd2",
+  "黒": "#9e9e9e",
+  "緑": "#c8e6c9",
+  "無": "#e0e0e0"
+};
+
+let deckImageBlob = null;
+let deckImageUrl = null;
+let deckImageFileName = "wixoss_deck.png";
+
+// 同じカード(ID)をまとめて「カード＋枚数」の配列にする（並び順は維持）
+function groupDeckCards(cards) {
+  const map = new Map();
+  cards.forEach(c => {
+    if (!map.has(c.id)) map.set(c.id, { card: c, count: 0 });
+    map.get(c.id).count++;
+  });
+  return [...map.values()];
+}
+
+function loadCardImageForCanvas(card) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = CARD_IMAGE_PROXY
+      ? CARD_IMAGE_PROXY + encodeURIComponent(card.image)
+      : card.image;
+  });
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function wrapTextLines(ctx, text, maxWidth) {
+  const lines = [];
+  let line = "";
+  for (const ch of String(text)) {
+    const test = line + ch;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = ch;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// 画像を取得できなかったカードの代替タイル
+function drawTextTile(ctx, x, y, w, h, card) {
+  const colorKey = Object.keys(CARD_TILE_FILL).find(k => (card.color || "").includes(k));
+  roundRectPath(ctx, x, y, w, h, 8);
+  ctx.fillStyle = CARD_TILE_FILL[colorKey] || "#eeeeee";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#888";
+  ctx.stroke();
+
+  ctx.fillStyle = "#222";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.font = `bold 18px ${IMG_FONT}`;
+  const lines = wrapTextLines(ctx, card.name, w - 20).slice(0, 5);
+  const lineH = 24;
+  const startY = y + h / 2 - ((lines.length - 1) * lineH) / 2 + 6;
+  lines.forEach((line, i) => ctx.fillText(line, x + w / 2, startY + i * lineH));
+
+  ctx.font = `12px ${IMG_FONT}`;
+  ctx.fillStyle = "#555";
+  ctx.fillText(card.id, x + w / 2, y + 16); // 下側は枚数バッジと重なるので上に置く
+}
+
+async function renderDeckImage(title) {
+  const sections = [
+    { title: "ルリグデッキ", cards: lrigDeck },
+    { title: "メインデッキ（ライフバースト有）", cards: mainBurst },
+    { title: "メインデッキ（ライフバースト無）", cards: mainNoBurst }
+  ]
+    .filter(sec => sec.cards.length > 0)
+    .map(sec => ({ ...sec, items: groupDeckCards(sec.cards) }));
+
+  if (sections.length === 0) return null;
+
+  // 画像を先にまとめて読み込む（取得できなかったものは null のまま代替表示）
+  const uniqueCards = new Map();
+  sections.forEach(sec => sec.items.forEach(it => uniqueCards.set(it.card.id, it.card)));
+
+  const images = new Map();
+  let failed = 0;
+  await Promise.all([...uniqueCards.values()].map(async card => {
+    const img = await loadCardImageForCanvas(card);
+    if (img) images.set(card.id, img);
+    else failed++;
+  }));
+
+  // レイアウト計算
+  const W = IMG_TILE_W, H = IMG_TILE_H, GAP = IMG_GAP, M = IMG_MARGIN;
+  const width = M * 2 + IMG_COLS * W + (IMG_COLS - 1) * GAP;
+  const HEADER_H = 110;
+  const SECTION_TITLE_H = 46;
+  const SECTION_GAP = 16;
+
+  let height = M + HEADER_H;
+  sections.forEach(sec => {
+    const rows = Math.ceil(sec.items.length / IMG_COLS);
+    sec.rows = rows;
+    height += SECTION_TITLE_H + rows * (H + GAP) - GAP + SECTION_GAP;
+  });
+  height += M - SECTION_GAP;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+
+  // ヘッダー
+  const name = localStorage.getItem("playerName") || "";
+  const lrig = localStorage.getItem("centerLrig") || "";
+  const subParts = [];
+  if (name && name !== "未設定") subParts.push(name);
+  if (lrig && lrig !== "未設定") subParts.push(`使用ルリグ：${lrig}`);
+
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#222";
+  ctx.font = `bold 44px ${IMG_FONT}`;
+  ctx.fillText(title || "WIXOSS デッキ", M, M + 44);
+
+  ctx.font = `22px ${IMG_FONT}`;
+  ctx.fillStyle = "#555";
+  if (subParts.length > 0) ctx.fillText(subParts.join("　/　"), M, M + 82);
+
+  const mainTotal = mainBurst.length + mainNoBurst.length;
+  ctx.textAlign = "right";
+  ctx.fillText(
+    `メイン ${mainTotal}枚（LB有 ${mainBurst.length} / LB無 ${mainNoBurst.length}）`,
+    width - M, M + 44
+  );
+  const d = new Date();
+  ctx.fillText(
+    `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`,
+    width - M, M + 82
+  );
+
+  ctx.strokeStyle = "#2196f3";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(M, M + HEADER_H - 14);
+  ctx.lineTo(width - M, M + HEADER_H - 14);
+  ctx.stroke();
+
+  // 各セクション
+  let y = M + HEADER_H;
+  sections.forEach(sec => {
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#222";
+    ctx.font = `bold 26px ${IMG_FONT}`;
+    ctx.fillText(`◆ ${sec.title}　${sec.cards.length}枚`, M, y + 32);
+    y += SECTION_TITLE_H;
+
+    sec.items.forEach((it, i) => {
+      const col = i % IMG_COLS;
+      const row = Math.floor(i / IMG_COLS);
+      const x = M + col * (W + GAP);
+      const ty = y + row * (H + GAP);
+
+      const img = images.get(it.card.id);
+      if (img) {
+        ctx.save();
+        roundRectPath(ctx, x, ty, W, H, 8);
+        ctx.clip();
+        ctx.drawImage(img, x, ty, W, H);
+        ctx.restore();
+        roundRectPath(ctx, x, ty, W, H, 8);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "#bbb";
+        ctx.stroke();
+      } else {
+        drawTextTile(ctx, x, ty, W, H, it.card);
+      }
+
+      // 2枚以上のカードには枚数バッジ
+      if (it.count > 1) {
+        const bx = x + W - 30;
+        const by = ty + H - 30;
+        ctx.beginPath();
+        ctx.arc(bx, by, 24, 0, Math.PI * 2);
+        ctx.fillStyle = "#e53935";
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+        ctx.fillStyle = "#fff";
+        ctx.font = `bold 24px ${IMG_FONT}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`×${it.count}`, bx, by + 1);
+      }
+    });
+
+    y += sec.rows * (H + GAP) - GAP + SECTION_GAP;
+  });
+
+  return { canvas, failed, total: uniqueCards.size };
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/png");
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+function resetDeckImageModal() {
+  if (deckImageUrl) URL.revokeObjectURL(deckImageUrl);
+  deckImageUrl = null;
+  deckImageBlob = null;
+
+  const preview = document.getElementById("deck-image-preview");
+  preview.style.display = "none";
+  preview.removeAttribute("src");
+  document.getElementById("deck-image-actions").style.display = "none";
+  document.getElementById("deck-image-status").textContent = "";
+}
+
+document.getElementById("export-image-btn").onclick = () => {
+  closeModal("export-modal");
+  resetDeckImageModal();
+  document.getElementById("deck-image-title").value = localStorage.getItem("deckImageTitle") || "";
+  openModal("deck-image-modal");
+};
+
+document.getElementById("deck-image-create").onclick = async () => {
+  const btn = document.getElementById("deck-image-create");
+  const status = document.getElementById("deck-image-status");
+  const title = document.getElementById("deck-image-title").value.trim();
+
+  if (lrigDeck.length + mainBurst.length + mainNoBurst.length === 0) {
+    status.textContent = "デッキにカードが入っていません。";
+    return;
+  }
+
+  localStorage.setItem("deckImageTitle", title);
+  resetDeckImageModal();
+  btn.disabled = true;
+  status.textContent = "画像を作成中です…";
+
+  try {
+    const result = await renderDeckImage(title);
+    const blob = await canvasToBlob(result.canvas);
+
+    deckImageBlob = blob;
+    deckImageUrl = URL.createObjectURL(blob);
+    const safeTitle = (title || "wixoss_deck").replace(/[\\/:*?"<>|]/g, "_");
+    deckImageFileName = `${safeTitle}.png`;
+
+    const preview = document.getElementById("deck-image-preview");
+    preview.src = deckImageUrl;
+    preview.style.display = "block";
+    document.getElementById("deck-image-actions").style.display = "block";
+
+    // 共有に対応した端末（主にスマホ）だけ「共有」ボタンを出す
+    const shareBtn = document.getElementById("deck-image-share");
+    const file = new File([blob], deckImageFileName, { type: "image/png" });
+    shareBtn.style.display =
+      navigator.canShare && navigator.canShare({ files: [file] }) ? "" : "none";
+
+    status.textContent = result.failed > 0
+      ? `作成しました。${result.failed}種類のカードは画像を取得できなかったため、カード名の表示で代替しています。`
+      : "作成しました。";
+  } catch (err) {
+    console.error(err);
+    status.textContent = "画像の作成に失敗しました。コンソールを確認してください。";
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+document.getElementById("deck-image-save").onclick = () => {
+  if (!deckImageUrl) return;
+  const a = document.createElement("a");
+  a.href = deckImageUrl;
+  a.download = deckImageFileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
+
+document.getElementById("deck-image-share").onclick = async () => {
+  if (!deckImageBlob) return;
+  const file = new File([deckImageBlob], deckImageFileName, { type: "image/png" });
+  try {
+    await navigator.share({ files: [file], title: deckImageFileName.replace(/\.png$/, "") });
+  } catch (err) {
+    // 共有をキャンセルした場合も含め、何もしない
+    if (err && err.name !== "AbortError") console.error(err);
+  }
+};
+
+document.getElementById("close-deck-image").onclick = () => {
+  closeModal("deck-image-modal");
+  resetDeckImageModal();
 };
