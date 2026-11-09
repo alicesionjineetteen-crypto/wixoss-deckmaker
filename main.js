@@ -113,6 +113,33 @@ const MAX_RESULTS = 60;
 const LONG_PRESS_MS = 200;
 const MOVE_THRESHOLD = 8; // px
 
+// =========================
+// ブラウザ標準の画像長押しメニュー（保存・共有・拡大など）を無効化
+// 長押しは自前のポップアップで処理するため、画像に対する標準動作を止める
+// =========================
+(function disableNativeImageLongPress() {
+  const style = document.createElement("style");
+  style.textContent = `
+    .card-img, #card-preview-img, #quantity-card-img {
+      -webkit-touch-callout: none; /* iOS: 長押しメニュー */
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // Android Chrome 等の長押しメニュー・PCの右クリックメニュー
+  document.addEventListener("contextmenu", (e) => {
+    if (e.target && e.target.tagName === "IMG") e.preventDefault();
+  });
+
+  // 画像のドラッグ開始（長押し→ドラッグ扱いになって pointercancel が飛ぶのを防ぐ）
+  document.addEventListener("dragstart", (e) => {
+    if (e.target && e.target.tagName === "IMG") e.preventDefault();
+  });
+})();
+
 function renderCards(cards, searched) {
   const list = document.getElementById("card-list");
   list.innerHTML = "";
