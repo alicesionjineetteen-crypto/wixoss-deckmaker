@@ -868,6 +868,94 @@ function setSavedDecks(decks) {
   }
 }
 
+// =========================
+// デッキ構築チェック（保存時のみ）
+// 組んでいる最中は警告を出さない。保存しようとしたときに問題があれば確認を出し、
+// 「このまま保存」するかどうかを選べる（保存自体は止めない）。
+// 枚数の不足は警告せず、保存済みデッキの一覧に「構築途中」と表示する。
+// =========================
+const MAIN_DECK_SIZE = 40;      // メインデッキの枚数
+const BURST_DECK_SIZE = 20;     // ライフバースト有・無それぞれの枚数
+const SERVANT_REQUIRED = 4;     // 「サーバント #」の必須枚数
+const LRIG_NON_PIECE_SIZE = 10; // ルリグデッキ（ピースを除く）の枚数
+const LRIG_TOTAL_MAX = 12;      // ルリグデッキ全体の上限（Excel出力の枠が12枚分）
+
+function isPieceCard(card) {
+  return String(card.type || "").includes("ピース");
+}
+
+// 保存データ（または現在のデッキ）から枚数の状況をまとめる
+function summarizeDeck(deck) {
+  const lrig = deck.lrigDeck || [];
+  const burst = deck.mainBurst || [];
+  const noBurst = deck.mainNoBurst || [];
+  const main = [...burst, ...noBurst];
+
+  return {
+    mainTotal: main.length,
+    burstCount: burst.length,
+    noBurstCount: noBurst.length,
+    servantCount: main.filter(c => c.name === SERVANT_CARD_NAME).length,
+    lrigTotal: lrig.length,
+    lrigNonPiece: lrig.filter(c => !isPieceCard(c)).length
+  };
+}
+
+// 保存前に確認するべき問題の一覧（空なら問題なし）
+function collectSaveWarnings(deck) {
+  const d = summarizeDeck(deck);
+  const warnings = [];
+
+  if (d.servantCount < SERVANT_REQUIRED) {
+    warnings.push(`「${SERVANT_CARD_NAME}」が${d.servantCount}枚です（${SERVANT_REQUIRED}枚入れるのが基本です）`);
+  }
+  if (d.mainTotal > MAIN_DECK_SIZE) {
+    warnings.push(`メインデッキが${d.mainTotal}枚です（${MAIN_DECK_SIZE}枚を超えています）`);
+  }
+  if (d.burstCount > BURST_DECK_SIZE) {
+    warnings.push(`ライフバースト有が${d.burstCount}枚です（${BURST_DECK_SIZE}枚を超えています）`);
+  }
+  if (d.noBurstCount > BURST_DECK_SIZE) {
+    warnings.push(`ライフバースト無が${d.noBurstCount}枚です（${BURST_DECK_SIZE}枚を超えています）`);
+  }
+  // 40枚そろっているのにLB有が20枚でないときだけ警告（途中の段階では出さない）
+  if (d.mainTotal === MAIN_DECK_SIZE && d.burstCount < BURST_DECK_SIZE) {
+    warnings.push(`メインデッキは${MAIN_DECK_SIZE}枚ですが、ライフバースト有が${d.burstCount}枚です（${BURST_DECK_SIZE}枚が基本です）`);
+  }
+  if (d.lrigNonPiece > LRIG_NON_PIECE_SIZE) {
+    warnings.push(`ルリグデッキ（ピースを除く）が${d.lrigNonPiece}枚です（${LRIG_NON_PIECE_SIZE}枚を超えています）`);
+  }
+  if (d.lrigTotal > LRIG_TOTAL_MAX) {
+    warnings.push(`ルリグデッキが全体で${d.lrigTotal}枚です（${LRIG_TOTAL_MAX}枚を超えています）`);
+  }
+
+  return warnings;
+}
+
+// 問題があれば確認ダイアログを出す。保存してよければ true
+function confirmDeckBeforeSave(deck) {
+  const warnings = collectSaveWarnings(deck);
+  if (warnings.length === 0) return true;
+  return confirm(`保存前の確認\n\n${warnings.map(w => `・${w}`).join("\n")}\n\nこのまま保存しますか？`);
+}
+
+// 保存済みデッキの一覧に出す状態表示（構築途中かどうか）
+function deckStatusChips(deck) {
+  const d = summarizeDeck(deck);
+  const chips = [];
+
+  if (d.mainTotal !== MAIN_DECK_SIZE) {
+    chips.push({ ok: false, text: `⚠ 構築途中：メイン${d.mainTotal}/${MAIN_DECK_SIZE}枚` });
+  }
+  if (d.lrigNonPiece < LRIG_NON_PIECE_SIZE) {
+    chips.push({ ok: false, text: `⚠ 構築途中：ルリグ${d.lrigNonPiece}/${LRIG_NON_PIECE_SIZE}枚（ピース除く）` });
+  }
+  if (chips.length === 0) {
+    chips.push({ ok: true, text: "✓ 枚数OK" });
+  }
+  return chips;
+}
+
 let deckTagFilter = "";
 
 // カンマ・読点・空白で区切ってタグの配列にする（重複は除く）
@@ -921,6 +1009,17 @@ function renderDeckList() {
     label.textContent = name;
     li.appendChild(label);
 
+    // 構築状況（メイン40枚・ルリグデッキの枚数）
+    const statusRow = document.createElement("div");
+    statusRow.className = "deck-meta";
+    deckStatusChips(deck).forEach(chip => {
+      const el = document.createElement("small");
+      el.className = `deck-status ${chip.ok ? "ok" : "warn"}`;
+      el.textContent = chip.text;
+      statusRow.appendChild(el);
+    });
+    li.appendChild(statusRow);
+
     // タグ・メモの表示
     const tags = deck.tags || [];
     if (tags.length > 0 || deck.memo) {
@@ -954,20 +1053,21 @@ function renderDeckList() {
     const overwriteBtn = document.createElement("button");
     overwriteBtn.textContent = "上書き";
     overwriteBtn.onclick = () => {
-      if (confirm(`「${name}」に上書き保存します。よろしいですか？`)) {
-        const d = getSavedDecks();
-        // メモ・タグは残したまま、デッキの中身だけ更新する
-        d[name] = {
-          ...d[name],
-          lrigDeck,
-          mainBurst,
-          mainNoBurst,
-          savedAt: new Date().toISOString()
-        };
-        setSavedDecks(d);
-        alert(`「${name}」を上書き保存しました`);
-        renderDeckList();
-      }
+      if (!confirm(`「${name}」に上書き保存します。よろしいですか？`)) return;
+      if (!confirmDeckBeforeSave({ lrigDeck, mainBurst, mainNoBurst })) return;
+
+      const d = getSavedDecks();
+      // メモ・タグは残したまま、デッキの中身だけ更新する
+      d[name] = {
+        ...d[name],
+        lrigDeck,
+        mainBurst,
+        mainNoBurst,
+        savedAt: new Date().toISOString()
+      };
+      setSavedDecks(d);
+      alert(`「${name}」を上書き保存しました`);
+      renderDeckList();
     };
 
     const metaBtn = document.createElement("button");
@@ -1063,6 +1163,8 @@ document.getElementById("deck-save-confirm").onclick = () => {
     alert("デッキ名を入力してください");
     return;
   }
+
+  if (!confirmDeckBeforeSave({ lrigDeck, mainBurst, mainNoBurst })) return;
 
   const tagsInput = document.getElementById("deck-save-tags").value;
   const memoInput = document.getElementById("deck-save-memo").value.trim();
