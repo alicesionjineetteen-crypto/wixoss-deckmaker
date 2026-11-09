@@ -30,6 +30,8 @@
   ニックネーム：<span id="nickname"></span><br>
   使用ルリグ：<span id="center-lrig"></span><br>
   <button id="open-settings">設定を開く</button>
+  <button id="open-opening-check" style="margin-left:8px;">🎲 初手チェック</button>
+  <button id="open-share" style="margin-left:8px;">🔗 デッキ共有</button>
   <a href="playtest.html" id="open-playtest" style="display:inline-block;margin-left:8px;">🎮 一人回し</a>
   <a href="versus.html" id="open-versus" style="display:inline-block;margin-left:8px;">⚔ 対戦盤面</a>
   <a href="battle.html" id="open-battle" style="display:inline-block;margin-left:8px;">⚙ ルール自動対戦</a>
@@ -156,6 +158,72 @@
     <hr>
 
     <button id="close-deck-image">閉じる</button>
+  </div>
+</div>
+
+<div id="opening-modal" class="modal">
+  <div class="modal-content opening-content">
+    <h3>初手チェック</h3>
+    <p id="opening-summary" class="modal-note"></p>
+
+    <div id="opening-stage"></div>
+
+    <details id="opening-judge">
+      <summary>LB判定の確認・修正</summary>
+      <p class="modal-note">「止められるLB」は、LBのテキストから自動で判定しています。違うものはチェックを付け外しして直してください（この端末に保存されます）。</p>
+      <div id="opening-judge-list"></div>
+    </details>
+
+    <button id="close-opening">閉じる</button>
+  </div>
+</div>
+
+<div id="deck-share-modal" class="modal">
+  <div class="modal-content share-content">
+    <h3>デッキの共有</h3>
+
+    <h4>共有URL・デッキコードを発行</h4>
+    <label for="share-deck-name">デッキ名（任意。共有先にも表示されます）</label>
+    <input id="share-deck-name" type="text" placeholder="例: 白ピルルク">
+    <button id="share-issue">現在のデッキからURLを発行</button>
+
+    <div id="share-result" style="display:none;">
+      <label for="share-url-area">共有URL</label>
+      <textarea id="share-url-area" rows="3" readonly></textarea>
+      <button id="share-copy-url">URLをコピー</button>
+      <button id="share-native" style="display:none;">共有</button>
+
+      <label for="share-code-area">デッキコード</label>
+      <textarea id="share-code-area" rows="3" readonly></textarea>
+      <button id="share-copy-code">コードをコピー</button>
+    </div>
+
+    <hr>
+
+    <h4>URL・コードから読み込む</h4>
+    <textarea id="share-import-area" rows="3" placeholder="共有URLまたはデッキコードを貼り付け"></textarea>
+    <button id="share-import-btn">内容を確認する</button>
+    <p id="share-import-status" class="modal-note"></p>
+
+    <hr>
+
+    <button id="close-share">閉じる</button>
+  </div>
+</div>
+
+<div id="shared-deck-modal" class="modal">
+  <div class="modal-content share-content">
+    <h3>共有されたデッキ</h3>
+    <p id="shared-deck-summary" class="shared-summary"></p>
+    <div id="shared-deck-list"></div>
+    <p id="shared-deck-warning" class="modal-note"></p>
+
+    <label for="shared-deck-save-name">保存するときの名前</label>
+    <input id="shared-deck-save-name" type="text">
+
+    <button id="shared-deck-load">作成画面に読み込む</button>
+    <button id="shared-deck-save">保存する</button>
+    <button id="shared-deck-close">閉じる</button>
   </div>
 </div>
 

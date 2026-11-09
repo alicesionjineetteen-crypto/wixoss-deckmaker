@@ -884,6 +884,20 @@ function isPieceCard(card) {
   return String(card.type || "").includes("ピース");
 }
 
+// card_info.js の BAN 列に数字が入っているカードは「その枚数まで」の制限カード
+// （例: "2" → 2枚まで）。制限がなければ null
+function getBanLimit(card) {
+  const n = parseInt(card.ban, 10);
+  return /^\d+$/.test(String(card.ban || "").trim()) ? n : null;
+}
+
+// 1枚のカードをデッキに入れられる上限
+function getCopyLimit(card) {
+  if (isLrigDeckCard(card)) return 1;
+  const ban = getBanLimit(card);
+  return ban !== null ? Math.min(ban, MAX_COPIES) : MAX_COPIES;
+}
+
 // 保存データ（または現在のデッキ）から枚数の状況をまとめる
 function summarizeDeck(deck) {
   const lrig = deck.lrigDeck || [];
@@ -922,6 +936,20 @@ function collectSaveWarnings(deck) {
   if (d.mainTotal === MAIN_DECK_SIZE && d.burstCount < BURST_DECK_SIZE) {
     warnings.push(`メインデッキは${MAIN_DECK_SIZE}枚ですが、ライフバースト有が${d.burstCount}枚です（${BURST_DECK_SIZE}枚が基本です）`);
   }
+  // 制限カード（BAN列に枚数が入っているカード）の超過
+  const banCounts = new Map();
+  [...(deck.mainBurst || []), ...(deck.mainNoBurst || [])].forEach(c => {
+    if (getBanLimit(c) === null) return;
+    banCounts.set(c.name, (banCounts.get(c.name) || { card: c, count: 0 }));
+    banCounts.get(c.name).count++;
+  });
+  banCounts.forEach(({ card, count }) => {
+    const limit = getBanLimit(card);
+    if (count > limit) {
+      warnings.push(`制限カード「${card.name}」が${count}枚です（${limit}枚までです）`);
+    }
+  });
+
   if (d.lrigNonPiece > LRIG_NON_PIECE_SIZE) {
     warnings.push(`ルリグデッキ（ピースを除く）が${d.lrigNonPiece}枚です（${LRIG_NON_PIECE_SIZE}枚を超えています）`);
   }
@@ -1741,7 +1769,7 @@ function updateSearchBadges() {
     if (!card || !badge) return;
 
     const count = deckCountForCard(card);
-    const max = isLrigDeckCard(card) ? 1 : MAX_COPIES;
+    const max = getCopyLimit(card);
 
     badge.style.display = count > 0 ? "" : "none";
     badge.textContent = `×${count}`;
@@ -2177,3 +2205,803 @@ document.getElementById("close-deck-image").onclick = () => {
   closeModal("deck-image-modal");
   resetDeckImageModal();
 };
+
+
+// =========================
+// 初手チェック
+// デッキを40枚（メインデッキ）としてシャッフルし、
+//   1. 初手5枚を引く
+//   2. マリガン（手札から好きな枚数をデッキに戻して同じ枚数を引き直す）をするか選ぶ
+//   3. ライフクロス7枚を展開する
+// の順に進め、ライフクロスに「ダメージを止められるLB」が何枚埋まるかを
+// 実際の展開と、確定した手札を前提にした確率（超幾何分布）で表示する。
+// =========================
+const OPENING_HAND_SIZE = 5;
+const OPENING_LIFE_SIZE = 7;
+const LB_OVERRIDE_KEY = "lbStopperOverrides";
+
+// 「ダメージを止められるLB」の自動判定ルール（LBテキストの文言で判定）
+//   ダメージ無効 : 「ダメージを受けない」「代わりに〜（デッキをトラッシュ等）」など
+//   アタック無効 : 「アタックを無効にする」など
+//   バニッシュ   : 対戦相手のシグニなどをバニッシュ
+//   ダウン       : 対戦相手のシグニなどをダウン（「ダウンし凍結する」を含む）
+//   アタック不可 : 「アタックできない」を与える
+// ※ 凍結だけのものは数えない。判定が違うものは画面の「LB判定の確認・修正」で直せる。
+const LB_STOPPER_RULES = [
+  { tag: "ダメージ無効", test: t => /ダメージ/.test(t) && /(受けない|代わりに|与えられない|受けず)/.test(t) },
+  { tag: "アタック無効", test: t => /アタック.{0,3}を?無効/.test(t) || /アタックフェイズ.{0,6}終了/.test(t) },
+  { tag: "バニッシュ", test: t => /対戦相手.{0,60}バニッシュ/.test(t) },
+  { tag: "ダウン", test: t => /対戦相手.{0,60}ダウン/.test(t) },
+  { tag: "アタック不可", test: t => /アタック(する)?(こと)?(が)?できない/.test(t) }
+];
+
+// カードテキストからライフバースト部分だけを取り出す
+function getLifeBurstText(card) {
+  const plain = String(card.text || "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ");
+  const i = plain.indexOf("【ライフバースト】");
+  return i < 0 ? "" : plain.slice(i).trim();
+}
+
+const lbAnalysisCache = new Map();
+
+function analyzeLifeBurst(card) {
+  if (lbAnalysisCache.has(card.id)) return lbAnalysisCache.get(card.id);
+  const text = getLifeBurstText(card);
+  const tags = LB_STOPPER_RULES.filter(rule => rule.test(text)).map(rule => rule.tag);
+  const result = { text, tags, auto: tags.length > 0 };
+  lbAnalysisCache.set(card.id, result);
+  return result;
+}
+
+// 手動で直した判定（カード名 → true/false）
+function loadLbOverrides() {
+  try {
+    const o = JSON.parse(localStorage.getItem(LB_OVERRIDE_KEY) || "{}");
+    return o && typeof o === "object" ? o : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveLbOverrides(overrides) {
+  localStorage.setItem(LB_OVERRIDE_KEY, JSON.stringify(overrides));
+}
+
+function isStopperLB(card, overrides) {
+  const o = (overrides || loadLbOverrides())[card.name];
+  return typeof o === "boolean" ? o : analyzeLifeBurst(card).auto;
+}
+
+// ---- 確率計算 ----
+function combinations(n, k) {
+  if (k < 0 || k > n) return 0;
+  k = Math.min(k, n - k);
+  let r = 1;
+  for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i;
+  return r;
+}
+
+// N枚のうち当たりがK枚あるとき、n枚引いて当たりがk枚出る確率（k = 0..n）
+function hypergeometricDist(N, K, n) {
+  const total = combinations(N, n);
+  const dist = [];
+  for (let k = 0; k <= n; k++) {
+    if (k > K || n - k > N - K) dist.push(0);
+    else dist.push((combinations(K, k) * combinations(N - K, n - k)) / total);
+  }
+  return dist;
+}
+
+// ---- 展開の状態 ----
+let openingState = null;
+
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function buildOpeningEntries() {
+  const overrides = loadLbOverrides();
+  return [
+    ...mainBurst.map(card => ({ card, lb: true, stopper: isStopperLB(card, overrides) })),
+    ...mainNoBurst.map(card => ({ card, lb: false, stopper: false }))
+  ];
+}
+
+function startOpening() {
+  const entries = buildOpeningEntries();
+  if (entries.length < OPENING_HAND_SIZE + OPENING_LIFE_SIZE) {
+    openingState = null;
+    return;
+  }
+  const deck = shuffleArray(entries);
+  openingState = {
+    stage: "hand",
+    hand: deck.splice(0, OPENING_HAND_SIZE),
+    deck,
+    life: [],
+    selected: new Set(),
+    mulliganCount: 0
+  };
+}
+
+function dealOpeningLife() {
+  const st = openingState;
+  st.life = st.deck.splice(0, OPENING_LIFE_SIZE);
+  st.stage = "life";
+}
+
+// 選んだ札をデッキに戻してシャッフルし、同じ枚数を引き直してからライフクロスを展開
+function confirmOpeningHand() {
+  const st = openingState;
+  const returned = st.hand.filter(e => st.selected.has(e));
+
+  if (returned.length > 0) {
+    st.hand = st.hand.filter(e => !st.selected.has(e));
+    st.deck = shuffleArray([...st.deck, ...returned]);
+    st.hand.push(...st.deck.splice(0, returned.length));
+  }
+  st.mulliganCount = returned.length;
+  st.selected.clear();
+  dealOpeningLife();
+  renderOpening();
+}
+
+// 手札は変えずに、ライフクロスだけ引き直す
+function redealOpeningLife() {
+  const st = openingState;
+  st.deck = shuffleArray([...st.deck, ...st.life]);
+  st.life = [];
+  dealOpeningLife();
+  renderOpening();
+}
+
+function allOpeningEntries() {
+  const st = openingState;
+  return [...st.hand, ...st.deck, ...st.life];
+}
+
+// ---- 表示 ----
+function makeOpeningTile(entry, selectable, selected, onClick) {
+  const tile = document.createElement("div");
+  tile.className = `opening-tile ${entry.stopper ? "stopper" : entry.lb ? "lb" : "none"}`;
+  if (selected) tile.classList.add("selected");
+
+  const img = document.createElement("img");
+  img.src = entry.card.image;
+  img.alt = entry.card.name;
+  img.title = entry.card.name;
+  img.draggable = false;
+  tile.appendChild(img);
+
+  if (selectable) {
+    tile.classList.add("clickable");
+    tile.onclick = onClick;
+  }
+  return tile;
+}
+
+function makeOpeningLegend() {
+  const legend = document.createElement("div");
+  legend.className = "opening-legend";
+  legend.innerHTML =
+    '<span><i class="stopper"></i>止められるLB</span>' +
+    '<span><i class="lb"></i>LB有（止められない）</span>' +
+    '<span><i class="none"></i>LBなし</span>';
+  return legend;
+}
+
+function makeOpeningHeading(text) {
+  const h = document.createElement("h4");
+  h.textContent = text;
+  return h;
+}
+
+function makeOpeningButton(text, onClick, options = {}) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = text;
+  if (options.sub) btn.className = "sub";
+  if (options.disabled) btn.disabled = true;
+  btn.onclick = onClick;
+  return btn;
+}
+
+function pct(p) {
+  return `${(p * 100).toFixed(1)}%`;
+}
+
+// 確率の表（actual があればその行を強調）
+function makeDistBlock(title, dist, N, K, n, actual) {
+  const block = document.createElement("div");
+  block.className = "opening-dist";
+
+  const titleEl = document.createElement("div");
+  titleEl.className = "opening-dist-title";
+  titleEl.textContent = title;
+  block.appendChild(titleEl);
+
+  const maxP = Math.max(...dist);
+  dist.forEach((p, k) => {
+    if (p < 0.0005 && k !== actual) return; // 0.05%未満の行は省略
+    const row = document.createElement("div");
+    row.className = "opening-dist-row" + (k === actual ? " actual" : "");
+
+    const kEl = document.createElement("span");
+    kEl.className = "k";
+    kEl.textContent = `${k}枚`;
+
+    const bar = document.createElement("span");
+    bar.className = "bar";
+    const fill = document.createElement("i");
+    fill.style.width = `${maxP > 0 ? (p / maxP) * 100 : 0}%`;
+    bar.appendChild(fill);
+
+    const pctEl = document.createElement("span");
+    pctEl.className = "pct";
+    pctEl.textContent = pct(p);
+
+    row.append(kEl, bar, pctEl);
+    block.appendChild(row);
+  });
+
+  const note = document.createElement("div");
+  note.className = "opening-dist-note";
+  note.textContent =
+    `期待値 ${((n * K) / N).toFixed(2)}枚 ／ 1枚以上入る確率 ${pct(1 - dist[0])}` +
+    `（${N}枚中${K}枚から${n}枚）`;
+  block.appendChild(note);
+
+  return block;
+}
+
+function renderOpening() {
+  const stageEl = document.getElementById("opening-stage");
+  const summaryEl = document.getElementById("opening-summary");
+  stageEl.innerHTML = "";
+
+  const st = openingState;
+  if (!st) {
+    summaryEl.textContent = "";
+    const msg = document.createElement("p");
+    msg.textContent =
+      `メインデッキが${mainBurst.length + mainNoBurst.length}枚です。` +
+      `初手${OPENING_HAND_SIZE}枚とライフクロス${OPENING_LIFE_SIZE}枚を引くため、` +
+      `${OPENING_HAND_SIZE + OPENING_LIFE_SIZE}枚以上入れてください。`;
+    stageEl.appendChild(msg);
+    return;
+  }
+
+  const all = allOpeningEntries();
+  const lbTotal = all.filter(e => e.lb).length;
+  const stopperTotal = all.filter(e => e.stopper).length;
+  summaryEl.textContent =
+    `メインデッキ ${all.length}枚（LB有 ${lbTotal}枚、うち止められるLB ${stopperTotal}枚）` +
+    (all.length !== MAIN_DECK_SIZE ? `　※${MAIN_DECK_SIZE}枚ではありません` : "");
+
+  if (st.stage === "hand") {
+    renderOpeningHandStage(stageEl, all);
+  } else {
+    renderOpeningLifeStage(stageEl);
+  }
+}
+
+function renderOpeningHandStage(stageEl, all) {
+  const st = openingState;
+
+  stageEl.appendChild(makeOpeningHeading(`初手${OPENING_HAND_SIZE}枚`));
+  const hint = document.createElement("div");
+  hint.className = "opening-dist-note";
+  hint.textContent = "マリガンする札をタップで選びます（選ばなければマリガンなし）。";
+  stageEl.appendChild(hint);
+
+  const row = document.createElement("div");
+  row.className = "opening-row hand";
+  st.hand.forEach(entry => {
+    row.appendChild(makeOpeningTile(entry, true, st.selected.has(entry), () => {
+      if (st.selected.has(entry)) st.selected.delete(entry);
+      else st.selected.add(entry);
+      renderOpening();
+    }));
+  });
+  stageEl.appendChild(row);
+  stageEl.appendChild(makeOpeningLegend());
+
+  const N = all.length;
+  const K = all.filter(e => e.stopper).length;
+  const handStoppers = st.hand.filter(e => e.stopper).length;
+  stageEl.appendChild(makeDistBlock(
+    `初手${OPENING_HAND_SIZE}枚に止められるLBが来る枚数（マリガン前）`,
+    hypergeometricDist(N, K, OPENING_HAND_SIZE), N, K, OPENING_HAND_SIZE, handStoppers
+  ));
+
+  const actions = document.createElement("div");
+  actions.className = "opening-actions";
+  const count = st.selected.size;
+  actions.appendChild(makeOpeningButton(
+    count > 0 ? `選んだ${count}枚をマリガンして、ライフクロスを展開` : "マリガンなしで、ライフクロスを展開",
+    confirmOpeningHand
+  ));
+  actions.appendChild(makeOpeningButton("初手を引き直す（最初から）", () => {
+    startOpening();
+    renderOpening();
+  }, { sub: true }));
+  stageEl.appendChild(actions);
+}
+
+function renderOpeningLifeStage(stageEl) {
+  const st = openingState;
+
+  const mulliganText = st.mulliganCount > 0 ? `マリガン：${st.mulliganCount}枚` : "マリガン：なし";
+  stageEl.appendChild(makeOpeningHeading(`手札（${mulliganText}）`));
+  const handRow = document.createElement("div");
+  handRow.className = "opening-row hand";
+  st.hand.forEach(entry => handRow.appendChild(makeOpeningTile(entry, false, false)));
+  stageEl.appendChild(handRow);
+
+  stageEl.appendChild(makeOpeningHeading(`ライフクロス ${st.life.length}枚`));
+  const lifeRow = document.createElement("div");
+  lifeRow.className = "opening-row life";
+  st.life.forEach(entry => lifeRow.appendChild(makeOpeningTile(entry, false, false)));
+  stageEl.appendChild(lifeRow);
+  stageEl.appendChild(makeOpeningLegend());
+
+  const lifeLb = st.life.filter(e => e.lb).length;
+  const lifeStoppers = st.life.filter(e => e.stopper).length;
+  const result = document.createElement("div");
+  result.className = "opening-result";
+  result.textContent = `今回の展開：LB有 ${lifeLb}枚 ／ 止められるLB ${lifeStoppers}枚`;
+  stageEl.appendChild(result);
+
+  // 手札が確定した状態での、ライフクロスの確率（手札を除いた残りのカードから引く）
+  const pool = [...st.deck, ...st.life];
+  const N = pool.length;
+  const n = st.life.length;
+  const K = pool.filter(e => e.stopper).length;
+  const KLb = pool.filter(e => e.lb).length;
+  const handStoppers = st.hand.filter(e => e.stopper).length;
+
+  const note = document.createElement("div");
+  note.className = "opening-dist-note";
+  note.textContent =
+    `この手札を前提に、残り${N}枚からライフクロス${n}枚が決まるときの確率です` +
+    `（手札に止められるLBが${handStoppers}枚あり、ライフクロスには入りません）。`;
+  stageEl.appendChild(note);
+
+  stageEl.appendChild(makeDistBlock(
+    "ライフクロスに入る「止められるLB」の枚数", hypergeometricDist(N, K, n), N, K, n, lifeStoppers
+  ));
+  stageEl.appendChild(makeDistBlock(
+    "ライフクロスに入る「LB有」の枚数", hypergeometricDist(N, KLb, n), N, KLb, n, lifeLb
+  ));
+
+  const actions = document.createElement("div");
+  actions.className = "opening-actions";
+  actions.appendChild(makeOpeningButton("ライフクロスを引き直す（手札はそのまま）", redealOpeningLife));
+  actions.appendChild(makeOpeningButton("初手から引き直す", () => {
+    startOpening();
+    renderOpening();
+  }, { sub: true }));
+  stageEl.appendChild(actions);
+}
+
+// ---- LB判定の確認・修正 ----
+function buildOpeningJudgeList() {
+  const listEl = document.getElementById("opening-judge-list");
+  listEl.innerHTML = "";
+
+  const overrides = loadLbOverrides();
+  const seen = new Set();
+
+  mainBurst.forEach(card => {
+    if (seen.has(card.name)) return;
+    seen.add(card.name);
+
+    const info = analyzeLifeBurst(card);
+
+    const row = document.createElement("div");
+    row.className = "judge-row";
+
+    const thumb = document.createElement("img");
+    thumb.className = "judge-thumb";
+    thumb.src = card.image;
+    thumb.alt = card.name;
+    thumb.loading = "lazy";
+    thumb.draggable = false;
+
+    const body = document.createElement("div");
+    body.className = "judge-body";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "judge-name";
+    nameEl.appendChild(document.createTextNode(card.name));
+    info.tags.forEach(tag => {
+      const t = document.createElement("span");
+      t.className = "judge-tag";
+      t.textContent = tag;
+      nameEl.appendChild(t);
+    });
+    const manual = document.createElement("span");
+    manual.className = "judge-manual";
+    manual.textContent = "（手動設定）";
+    manual.style.display = typeof overrides[card.name] === "boolean" ? "" : "none";
+    nameEl.appendChild(manual);
+
+    const textEl = document.createElement("div");
+    textEl.className = "judge-text";
+    textEl.textContent = info.text || "（ライフバーストのテキストが見つかりません）";
+
+    const label = document.createElement("label");
+    label.className = "judge-check";
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.checked = isStopperLB(card, overrides);
+    check.onchange = () => {
+      const o = loadLbOverrides();
+      if (check.checked === info.auto) delete o[card.name];
+      else o[card.name] = check.checked;
+      saveLbOverrides(o);
+      manual.style.display = typeof o[card.name] === "boolean" ? "" : "none";
+
+      // 展開中のカードにも反映して、確率を計算し直す
+      if (openingState) {
+        allOpeningEntries().forEach(e => {
+          if (e.lb) e.stopper = isStopperLB(e.card, o);
+        });
+        renderOpening();
+      }
+    };
+    label.append(check, document.createTextNode("止められるLBとして数える"));
+
+    body.append(nameEl, textEl, label);
+    row.append(thumb, body);
+    listEl.appendChild(row);
+  });
+
+  if (seen.size === 0) {
+    listEl.textContent = "メインデッキにLB有のカードがありません。";
+  }
+}
+
+document.getElementById("open-opening-check").onclick = () => {
+  startOpening();
+  renderOpening();
+  buildOpeningJudgeList();
+  document.getElementById("opening-judge").open = false;
+  openModal("opening-modal");
+};
+
+document.getElementById("close-opening").onclick = () => {
+  closeModal("opening-modal");
+  openingState = null;
+};
+
+
+// =========================
+// デッキの共有（URL・デッキコード）
+// デッキを「カードID＋枚数」だけの短いコードにして、URLに載せて共有する。
+//   共有URL : （このページのURL）?d=<デッキコード>
+//   デッキコード : {"v":1,"n":"デッキ名","l":[ルリグデッキ],"m":[メインデッキ]} をBase64URL化したもの
+//   カードは「ID」または「ID*枚数」で表す（例: WX24-P2-052*2）
+// 共有されたURLを開く（またはコードを貼り付ける）と内容を確認でき、
+// 作成画面への読み込み・デッキの保存ができる。
+// =========================
+const SHARE_CODE_VERSION = 1;
+const SHARE_MAX_CARDS = 200;
+
+let cardsByIdCache = null;
+function getCardsById() {
+  if (!cardsByIdCache) cardsByIdCache = new Map(allCards.map(c => [c.id, c]));
+  return cardsByIdCache;
+}
+
+function toBase64Url(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  bytes.forEach(b => { bin += String.fromCharCode(b); });
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64Url(code) {
+  let b64 = code.replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4) b64 += "=";
+  const bin = atob(b64);
+  const bytes = Uint8Array.from(bin, ch => ch.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+// カードの配列を「ID」「ID*枚数」の配列にまとめる（並び順は維持）
+function packCardIds(cards) {
+  const counts = new Map();
+  cards.forEach(c => counts.set(c.id, (counts.get(c.id) || 0) + 1));
+  return [...counts].map(([id, n]) => (n > 1 ? `${id}*${n}` : id));
+}
+
+function encodeDeckCode(name) {
+  const payload = {
+    v: SHARE_CODE_VERSION,
+    l: packCardIds(lrigDeck),
+    m: packCardIds([...mainBurst, ...mainNoBurst])
+  };
+  if (name) payload.n = name;
+  return toBase64Url(JSON.stringify(payload));
+}
+
+function buildShareUrl(code) {
+  return `${location.href.split(/[?#]/)[0]}?d=${code}`;
+}
+
+// URLでもコードだけでも受け付ける。読み取れなければ Error を投げる
+function decodeDeckCode(input) {
+  const text = String(input || "").trim();
+  if (!text) throw new Error("コードが空です");
+
+  const m = text.match(/[?&]d=([A-Za-z0-9_-]+)/);
+  const code = m ? m[1] : text.replace(/\s+/g, "");
+
+  let payload;
+  try {
+    payload = JSON.parse(fromBase64Url(code));
+  } catch (e) {
+    throw new Error("デッキコードを読み取れませんでした");
+  }
+  if (!payload || payload.v !== SHARE_CODE_VERSION || !Array.isArray(payload.l) || !Array.isArray(payload.m)) {
+    throw new Error("対応していない形式のデッキコードです");
+  }
+
+  const byId = getCardsById();
+  const missing = [];
+  let total = 0;
+
+  const expand = (list) => {
+    const cards = [];
+    list.forEach(token => {
+      const [id, countStr] = String(token).split("*");
+      const count = countStr === undefined ? 1 : parseInt(countStr, 10);
+      if (!id || !Number.isInteger(count) || count < 1) return;
+      total += count;
+      if (total > SHARE_MAX_CARDS) throw new Error("カードの枚数が多すぎます");
+
+      const card = byId.get(id);
+      if (!card) {
+        missing.push(id);
+        return;
+      }
+      for (let i = 0; i < count; i++) cards.push(card);
+    });
+    return cards;
+  };
+
+  const lrigPart = expand(payload.l);
+  const mainPart = expand(payload.m);
+
+  // 保存形式に合わせて、ルリグデッキ／メイン(LB有)／メイン(LB無)に振り分ける
+  const deck = { lrigDeck: [], mainBurst: [], mainNoBurst: [] };
+  [...lrigPart, ...mainPart].forEach(card => {
+    if (isLrigDeckCard(card)) deck.lrigDeck.push(card);
+    else if (card.burst) deck.mainBurst.push(card);
+    else deck.mainNoBurst.push(card);
+  });
+
+  deck.name = typeof payload.n === "string" ? payload.n.slice(0, 50) : "";
+  deck.missing = missing;
+  return deck;
+}
+
+// クリップボードにコピー（非対応なら選択してコピー）
+async function copyShareText(text, textareaEl, buttonEl) {
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    copied = true;
+  } catch (e) {
+    try {
+      textareaEl.focus();
+      textareaEl.select();
+      copied = document.execCommand("copy");
+    } catch (e2) {
+      copied = false;
+    }
+  }
+  const original = buttonEl.textContent;
+  buttonEl.textContent = copied ? "コピーしました" : "コピーできませんでした";
+  setTimeout(() => { buttonEl.textContent = original; }, 1500);
+}
+
+// ---- 共有モーダル（発行・コード貼り付け） ----
+document.getElementById("open-share").onclick = () => {
+  document.getElementById("share-result").style.display = "none";
+  document.getElementById("share-import-status").textContent = "";
+  document.getElementById("share-native").style.display = navigator.share ? "" : "none";
+  openModal("deck-share-modal");
+};
+
+document.getElementById("share-issue").onclick = () => {
+  if (lrigDeck.length + mainBurst.length + mainNoBurst.length === 0) {
+    alert("デッキにカードが入っていません");
+    return;
+  }
+  const name = document.getElementById("share-deck-name").value.trim().slice(0, 50);
+  const code = encodeDeckCode(name);
+  document.getElementById("share-url-area").value = buildShareUrl(code);
+  document.getElementById("share-code-area").value = code;
+  document.getElementById("share-result").style.display = "block";
+};
+
+document.getElementById("share-copy-url").onclick = () => {
+  copyShareText(
+    document.getElementById("share-url-area").value,
+    document.getElementById("share-url-area"),
+    document.getElementById("share-copy-url")
+  );
+};
+
+document.getElementById("share-copy-code").onclick = () => {
+  copyShareText(
+    document.getElementById("share-code-area").value,
+    document.getElementById("share-code-area"),
+    document.getElementById("share-copy-code")
+  );
+};
+
+document.getElementById("share-native").onclick = async () => {
+  const url = document.getElementById("share-url-area").value;
+  const name = document.getElementById("share-deck-name").value.trim();
+  try {
+    await navigator.share({ title: name || "WIXOSSデッキ", url });
+  } catch (err) {
+    if (err && err.name !== "AbortError") console.error(err);
+  }
+};
+
+document.getElementById("share-import-btn").onclick = () => {
+  const status = document.getElementById("share-import-status");
+  try {
+    const deck = decodeDeckCode(document.getElementById("share-import-area").value);
+    status.textContent = "";
+    closeModal("deck-share-modal");
+    openSharedDeckPreview(deck);
+  } catch (err) {
+    status.textContent = err.message;
+  }
+};
+
+document.getElementById("close-share").onclick = () => {
+  closeModal("deck-share-modal");
+};
+
+// ---- 共有されたデッキの確認（読み込み・保存） ----
+let sharedDeckPending = null;
+
+function openSharedDeckPreview(deck) {
+  sharedDeckPending = deck;
+
+  const mainTotal = deck.mainBurst.length + deck.mainNoBurst.length;
+  document.getElementById("shared-deck-summary").textContent =
+    (deck.name ? `「${deck.name}」` : "（名前なし）") +
+    `　ルリグデッキ ${deck.lrigDeck.length}枚 ／ メインデッキ ${mainTotal}枚` +
+    `（LB有 ${deck.mainBurst.length} / LB無 ${deck.mainNoBurst.length}）`;
+
+  const warning = document.getElementById("shared-deck-warning");
+  warning.textContent = deck.missing.length > 0
+    ? `このサイトのカードデータにないカードが${deck.missing.length}種類あり、読み込めませんでした（${deck.missing.slice(0, 5).join("、")}${deck.missing.length > 5 ? " など" : ""}）。`
+    : "";
+
+  // カードを画像＋枚数バッジで一覧表示
+  const listEl = document.getElementById("shared-deck-list");
+  listEl.innerHTML = "";
+  [
+    ["◆ ルリグデッキ", deck.lrigDeck],
+    ["◆ メインデッキ（ライフバースト有）", deck.mainBurst],
+    ["◆ メインデッキ（ライフバースト無）", deck.mainNoBurst]
+  ].forEach(([title, cards]) => {
+    if (cards.length === 0) return;
+
+    const h = document.createElement("h4");
+    h.textContent = `${title}　${cards.length}枚`;
+    listEl.appendChild(h);
+
+    const grid = document.createElement("div");
+    grid.className = "shared-grid";
+    const counts = new Map();
+    cards.forEach(c => counts.set(c.id, { card: c, n: (counts.get(c.id)?.n || 0) + 1 }));
+    counts.forEach(({ card, n }) => {
+      const wrap = document.createElement("div");
+      wrap.className = "card-wrap";
+
+      const img = document.createElement("img");
+      img.className = "card-img";
+      img.src = card.image;
+      img.alt = card.name;
+      img.title = card.name;
+      img.loading = "lazy";
+      img.draggable = false;
+      wrap.appendChild(img);
+
+      if (n > 1) {
+        const badge = document.createElement("span");
+        badge.className = "card-badge";
+        badge.textContent = `×${n}`;
+        wrap.appendChild(badge);
+      }
+      grid.appendChild(wrap);
+    });
+    listEl.appendChild(grid);
+  });
+
+  document.getElementById("shared-deck-save-name").value = deck.name || "";
+  openModal("shared-deck-modal");
+}
+
+document.getElementById("shared-deck-load").onclick = () => {
+  const deck = sharedDeckPending;
+  if (!deck) return;
+
+  const hasCurrent = lrigDeck.length + mainBurst.length + mainNoBurst.length > 0;
+  if (hasCurrent && !confirm("いま作成中のデッキは、この共有デッキに置き換わります（「元に戻す」で戻せます）。よろしいですか？")) {
+    return;
+  }
+
+  lrigDeck = [...deck.lrigDeck];
+  mainBurst = [...deck.mainBurst];
+  mainNoBurst = [...deck.mainNoBurst];
+  refreshDeckDisplay();
+
+  closeModal("shared-deck-modal");
+  sharedDeckPending = null;
+};
+
+document.getElementById("shared-deck-save").onclick = () => {
+  const deck = sharedDeckPending;
+  if (!deck) return;
+
+  const name = document.getElementById("shared-deck-save-name").value.trim();
+  if (!name) {
+    alert("保存するときの名前を入力してください");
+    return;
+  }
+
+  const decks = getSavedDecks();
+  if (decks[name] && !confirm(`「${name}」はすでに保存されています。上書きしますか？`)) return;
+
+  decks[name] = {
+    lrigDeck: [...deck.lrigDeck],
+    mainBurst: [...deck.mainBurst],
+    mainNoBurst: [...deck.mainNoBurst],
+    tags: [],
+    memo: "",
+    savedAt: new Date().toISOString()
+  };
+  setSavedDecks(decks);
+  renderDeckList();
+  alert(`「${name}」として保存しました`);
+};
+
+document.getElementById("shared-deck-close").onclick = () => {
+  closeModal("shared-deck-modal");
+  sharedDeckPending = null;
+};
+
+// 共有URL（?d=…）で開かれたら、内容の確認画面を出す
+(function openSharedDeckFromUrl() {
+  const m = location.search.match(/[?&]d=([A-Za-z0-9_-]+)/);
+  if (!m) return;
+
+  try {
+    openSharedDeckPreview(decodeDeckCode(m[1]));
+  } catch (err) {
+    alert(`共有URLの内容を読み込めませんでした：${err.message}`);
+  }
+  // 再読み込みのたびに確認画面が出ないよう、URLからコードを取り除く
+  try {
+    history.replaceState(null, "", location.href.split(/[?#]/)[0]);
+  } catch (e) {
+    // 取り除けなくても動作に影響はない
+  }
+})();

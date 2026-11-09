@@ -50,13 +50,17 @@ self.addEventListener("activate", (event) => {
 // （card_info.js など、頻繁に更新するファイルが古いまま残らないようにするため）
 async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
+  // ページ本体は「?d=…」（共有URL）が付いていても同じキャッシュに保存する
+  const cacheKey = request.mode === "navigate"
+    ? request.url.split(/[?#]/)[0]
+    : request;
   try {
     const response = await Promise.race([
       fetch(request),
       new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), NETWORK_TIMEOUT_MS))
     ]);
     if (response && response.ok) {
-      cache.put(request, response.clone());
+      cache.put(cacheKey, response.clone());
     }
     return response;
   } catch (err) {
