@@ -402,50 +402,132 @@ function attachDeckCardEvents(img, card, allowLongPress) {
   img.addEventListener("pointerleave", cancelPress);
 }
 
-function promptAddMore(card) {
-  const currentTotal = countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
-  const remaining = 4 - currentTotal;
+// =========================
+// 長押し時の「枚数選択」ポップアップ
+// 全部で何枚入れるか（0〜4枚）をドロップダウンで選び、OKでその枚数に揃える
+// ポップアップのHTMLはJSから生成するので、index.html / CSS の変更は不要
+// =========================
+const MAX_COPIES = 4;
+let quantityModalEl = null;
+let quantityTargetCard = null;
+let quantityOpenedAt = 0;
 
-  if (remaining <= 0) {
-    alert(`「${card.name}」はすでに上限（4枚）まで入っています`);
-    return;
+function buildQuantityModal() {
+  const overlay = document.createElement("div");
+  overlay.id = "quantity-modal";
+  overlay.style.cssText =
+    "display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;";
+
+  const box = document.createElement("div");
+  box.style.cssText =
+    "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);" +
+    "background:#fff;color:#222;border-radius:12px;padding:16px;" +
+    "width:min(86vw,300px);box-sizing:border-box;text-align:center;" +
+    "box-shadow:0 4px 20px rgba(0,0,0,0.4);";
+
+  const img = document.createElement("img");
+  img.id = "quantity-card-img";
+  img.style.cssText = "width:110px;max-width:40%;border-radius:6px;margin-bottom:8px;";
+
+  const title = document.createElement("div");
+  title.id = "quantity-title";
+  title.style.cssText = "font-weight:bold;margin-bottom:12px;word-break:break-all;";
+
+  const label = document.createElement("label");
+  label.style.cssText = "display:block;margin-bottom:14px;";
+  label.appendChild(document.createTextNode("デッキに入れる枚数："));
+
+  const select = document.createElement("select");
+  select.id = "quantity-select";
+  select.style.cssText = "font-size:16px;padding:6px 10px;";
+  for (let i = 0; i <= MAX_COPIES; i++) {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = i === 0 ? "0枚（デッキから外す）" : `${i}枚`;
+    select.appendChild(opt);
   }
+  label.appendChild(select);
 
-  const input = prompt(
-    `「${card.name}」を追加する枚数を入力してください\n（現在${currentTotal}枚 / あと${remaining}枚まで追加可）`,
-    "1"
-  );
-  if (input === null) return;
+  const btnRow = document.createElement("div");
+  btnRow.style.cssText = "display:flex;gap:10px;justify-content:center;";
 
-  const qty = parseInt(input, 10);
-  if (!Number.isInteger(qty) || qty <= 0) {
-    alert("正しい枚数を入力してください");
-    return;
-  }
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.textContent = "キャンセル";
+  cancelBtn.onclick = closeQuantityModal;
 
-  addQuantityToDeck(card, qty);
+  const okBtn = document.createElement("button");
+  okBtn.type = "button";
+  okBtn.textContent = "OK";
+  okBtn.onclick = () => {
+    const total = parseInt(select.value, 10);
+    const card = quantityTargetCard;
+    closeQuantityModal();
+    if (card) setMainCopies(card, total);
+  };
+
+  [cancelBtn, okBtn].forEach(b => {
+    b.style.cssText = "flex:1;font-size:15px;padding:8px 0;";
+  });
+
+  btnRow.append(cancelBtn, okBtn);
+  box.append(img, title, label, btnRow);
+  overlay.appendChild(box);
+
+  // 背景タップで閉じる（長押しした指を離した瞬間の誤クローズを防ぐため、開いた直後は無視）
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay && Date.now() - quantityOpenedAt > 400) {
+      closeQuantityModal();
+    }
+  });
+
+  document.body.appendChild(overlay);
+  return overlay;
 }
 
-function addQuantityToDeck(card, qty) {
+function closeQuantityModal() {
+  if (!quantityModalEl || quantityModalEl.style.display === "none") return;
+  closeModal("quantity-modal");
+  quantityTargetCard = null;
+}
+
+// 長押し時に呼ばれる（旧：prompt で枚数入力）
+function promptAddMore(card) {
+  if (!quantityModalEl) quantityModalEl = buildQuantityModal();
+
   const currentTotal = countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
-  const available = 4 - currentTotal;
 
-  if (available <= 0) {
-    alert(`「${card.name}」はすでに上限（4枚）まで入っています`);
-    return;
-  }
+  quantityTargetCard = card;
+  quantityOpenedAt = Date.now();
+  document.getElementById("quantity-card-img").src = card.image;
+  document.getElementById("quantity-title").textContent = card.name;
+  document.getElementById("quantity-select").value = String(Math.min(currentTotal, MAX_COPIES));
 
-  const actualQty = Math.min(qty, available);
-  if (actualQty < qty) {
-    alert(`上限（4枚）の関係で${actualQty}枚だけ追加しました`);
-  }
+  openModal("quantity-modal");
+}
 
-  for (let i = 0; i < actualQty; i++) {
-    if (card.burst) {
-      mainBurst.push(card);
-    } else {
-      mainNoBurst.push(card);
+// 同名カードの合計枚数が total 枚になるよう、追加または削除する
+function setMainCopies(card, total) {
+  const currentTotal = countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
+
+  if (total > currentTotal) {
+    const target = card.burst ? mainBurst : mainNoBurst;
+    for (let i = currentTotal; i < total; i++) {
+      target.push(card);
     }
+  } else if (total < currentTotal) {
+    // 末尾の同名カードから順に取り除く
+    let toRemove = currentTotal - total;
+    for (const arr of [mainNoBurst, mainBurst]) {
+      for (let i = arr.length - 1; i >= 0 && toRemove > 0; i--) {
+        if (arr[i].name === card.name) {
+          arr.splice(i, 1);
+          toRemove--;
+        }
+      }
+    }
+  } else {
+    return; // 変更なし
   }
 
   refreshDeckDisplay();
