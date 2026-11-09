@@ -229,9 +229,121 @@ document.getElementById("close-card-preview").onclick = () => {
 // 初期表示は空。検索するまでカードを描画しない
 renderCards([]);
 
+// =========================
+// 収録弾ドロップダウン
+// カードID（例: WX26-P2-001）の末尾の連番を除いた部分を「収録弾コード」として扱う。
+// 表示名を付けたい弾は SET_NAMES に追記する（無い弾はコードのみ表示）
+// =========================
+// 並びは新しい弾が上（ドロップダウンの表示順にも使う）
+const SET_NAMES = {
+  "WX26-P2": "CONFLICT SELECTOR",
+  "WX26-P1": "Lostorage SELECTOR",
+  "WX26-CP1": "プリンセッション・オーケストラ SELECTOR",
+  "WX25-P3": "LUMINOUS SELECTOR",
+  "WX25-P2": "RESONANCE SELECTOR",
+  "WX25-P1": "PRIMAL SELECTOR",
+  "WX25-CP1": "ブルーアーカイブ SELECTOR",
+  "WX25-CD1": "デッキ ブルーアーカイブ",
+  "WX24-P4": "FORTH SELECTOR",
+  "WX24-P3": "REVERSAL SELECTOR",
+  "WX24-P2": "loth SELECTOR",
+  "WX24-P1": "RECOLLECT SELECTOR",
+  "WX24-D5": "デッキ BLACK ALT DESIRE",
+  "WX24-D4": "デッキ GREEN ALT WANNA",
+  "WX24-D3": "デッキ BLUE ALT APPLI",
+  "WX24-D2": "デッキ RED ALT AMBITION",
+  "WX24-D1": "デッキ WHITE ALT HOPE",
+  "WXDi-P16": "LEGENDARY DIVA",
+  "WXDi-P15": "DIVISIONS DIVA",
+  "WXDi-CP02": "ブルーアーカイブ DIVA",
+  "WXDi-P14": "フェゾーネ DIVA with 電音部",
+  "WXDi-P13": "CONCORD DIVA",
+  "WXDi-P12": "DISSONANCE DIVA",
+  "WXDi-CP01": "にじさんじ DIVA",
+  "WXDi-D09": "デッキ SUPER DIVA DECK DOUBLE HEROINES -ピルルク＆ヒラナ-",
+  "WXDi-P11": "REUNION DIVA",
+  "WXDi-P10": "PRISMATIC DIVA",
+  "WXDi-P09": "CONFLATED DIVA",
+  "WXDi-P08": "SPREAD DIVA",
+  "WXDi-P07": "WELCOME BACK DIVA ～Lostorage～",
+  "WXDi-P06": "WELCOME BACK DIVA ～selector～",
+  "WXDi-D08": "デッキ DIVA DEBUT DECK WHITE HOPE",
+  "WXDi-P05": "CURIOSITY DIVA",
+  "WXDi-P04": "VERTEX DIVA",
+  "WXDi-D07": "デッキ TOP DIVA DECK D・X・M",
+  "WXDi-P03": "STANDUP DIVA",
+  "WXDi-P02": "CHANGING DIVA",
+  "WXDi-P01": "GLOWING DIVA",
+  "WXDi-D06": "デッキ DIVA DEBUT DECK DIAGRAM",
+  "WXDi-D05": "デッキ DIVA DEBUT DECK うちゅうのはじまり",
+  "WXDi-D04": "デッキ DIVA DEBUT DECK Card Jockey",
+  "WXDi-D03": "デッキ DIVA DEBUT DECK No Limit",
+  "WXDi-P00": "INTERLUDE DIVA",
+  "WXDi-D02": "デッキ DIVA DEBUT DECK にじさんじ ver.さんばか",
+  "WXDi-D01": "デッキ ANCIENT SURPRISE",
+  "PR": "PRカード",
+  "SP": "SPカード"
+};
+
+function getSetCode(card) {
+  return String(card.id).replace(/-[^-]*$/, "");
+}
+
+(function setupSetFilter() {
+  const panel = document.getElementById("advanced-search-panel");
+  if (!panel || document.getElementById("filter-set")) return;
+
+  // card_info.js に実在する収録弾だけを、SET_NAMES の並び（新しい弾が先）で表示する。
+  // SET_NAMES に無い弾は、card_info.js の初出順で末尾に並べる
+  const present = [];
+  const seen = new Set();
+  allCards.forEach(c => {
+    const code = getSetCode(c);
+    if (!seen.has(code)) {
+      seen.add(code);
+      present.push(code);
+    }
+  });
+  const known = Object.keys(SET_NAMES).filter(code => seen.has(code));
+  const unknown = present.filter(code => !(code in SET_NAMES));
+  const codes = [...known, ...unknown];
+
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText = "margin:6px 0;";
+
+  const label = document.createElement("label");
+  label.textContent = "収録弾：";
+
+  const select = document.createElement("select");
+  select.id = "filter-set";
+
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "すべて";
+  select.appendChild(all);
+
+  codes.forEach(code => {
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = SET_NAMES[code] ? `${code} ${SET_NAMES[code]}` : code;
+    select.appendChild(opt);
+  });
+
+  select.onchange = runSearch;
+  label.appendChild(select);
+  wrapper.appendChild(label);
+
+  // 「クリア」ボタンの直前（パネル直下の要素の前）に差し込む
+  let anchor = document.getElementById("clear-advanced-search");
+  while (anchor && anchor.parentNode !== panel) anchor = anchor.parentNode;
+  panel.insertBefore(wrapper, anchor || null);
+})();
+
 // 詳細検索の条件を取得
 function getAdvancedFilters() {
+  const setEl = document.getElementById("filter-set");
   return {
+    set: setEl ? setEl.value : "",
     name: document.getElementById("filter-name").value.trim().toLowerCase(),
     type: document.getElementById("filter-type").value,
     level: document.getElementById("filter-level").value,
@@ -244,11 +356,12 @@ function getAdvancedFilters() {
 }
 
 function hasActiveAdvancedFilters(f) {
-  return !!(f.name || f.type || f.level || f.color || f.cls || f.timing || f.burst || f.text);
+  return !!(f.set || f.name || f.type || f.level || f.color || f.cls || f.timing || f.burst || f.text);
 }
 
 // カードが詳細検索条件（AND）に合致するか
 function matchesAdvancedFilters(card, f) {
+  if (f.set && getSetCode(card) !== f.set) return false;
   if (f.name && !card.name.toLowerCase().includes(f.name)) return false;
   if (f.type && !card.type.includes(f.type)) return false;
   if (f.level && card.level !== f.level) return false;
@@ -325,6 +438,8 @@ document.getElementById("filter-text").oninput = () => {
 };
 
 document.getElementById("clear-advanced-search").onclick = () => {
+  const setEl = document.getElementById("filter-set");
+  if (setEl) setEl.value = "";
   document.getElementById("filter-name").value = "";
   document.getElementById("filter-type").value = "";
   document.getElementById("filter-level").value = "";
