@@ -474,3 +474,20 @@ body {
   border: 1px solid #ddd;
   border-radius: 6px;
 }
+
+/* ===== 保存済みデッキの構築状況 ===== */
+.deck-status {
+  display: inline-block;
+  margin: 0 4px 4px 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.deck-status.warn {
+  background: #fff3e0;
+  color: #e65100;
+}
+.deck-status.ok {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
