@@ -131,9 +131,7 @@ const MOVE_THRESHOLD = 8; // px
 
   // Android Chrome 等の長押しメニュー・PCの右クリックメニュー
   document.addEventListener("contextmenu", (e) => {
-    if (e.target && e.target.tagName === "IMG" && e.target.id !== "deck-image-preview") {
-      e.preventDefault();
-    }
+    if (e.target && e.target.tagName === "IMG") e.preventDefault();
   });
 
   // 画像のドラッグ開始（長押し→ドラッグ扱いになって pointercancel が飛ぶのを防ぐ）
@@ -1861,34 +1859,17 @@ document.addEventListener("keydown", (e) => {
 });
 
 // =========================
-// デッキ画像の書き出し（PNG）
-// カード画像を canvas に描いて1枚の画像にする。
-// 画像サーバー側が他サイトからの読み込み（CORS）を許可していない場合は、
-// そのカードだけ「カード名のタイル」で代替する。
-// 画像を確実に載せたい場合は、CARD_IMAGE_PROXY に画像中継サーバーのURLを設定する
-// （例: "https://xxxx.workers.dev/?url=" ← 末尾に元画像のURLがエンコードされて付く）
+// デッキ画像（スクリーンショット用の表示）
+// デッキを1枚の「画像のようなページ」として画面いっぱいに表示する。
+// カード画像は普通の<img>で表示するだけなので、画像サーバー側の制限に左右されず、
+// そのままスクリーンショットすれば共有用の画像になる。
+// 「操作を隠す」でボタン類を消し、画面をタップすると元に戻る。
 // =========================
-const CARD_IMAGE_PROXY = "";
+const SHOT_TITLE_KEY = "deckImageTitle";
 
-const IMG_COLS = 10;
-const IMG_TILE_W = 150;
-const IMG_TILE_H = 210;
-const IMG_GAP = 10;
-const IMG_MARGIN = 30;
-const IMG_FONT = '"Hiragino Sans", "Noto Sans JP", "Yu Gothic", "Meiryo", sans-serif';
-
-const CARD_TILE_FILL = {
-  "白": "#f5f5f0",
-  "青": "#bbdefb",
-  "赤": "#ffcdd2",
-  "黒": "#9e9e9e",
-  "緑": "#c8e6c9",
-  "無": "#e0e0e0"
-};
-
-let deckImageBlob = null;
-let deckImageUrl = null;
-let deckImageFileName = "wixoss_deck.png";
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
 
 // 同じカード(ID)をまとめて「カード＋枚数」の配列にする（並び順は維持）
 function groupDeckCards(cards) {
@@ -1900,321 +1881,204 @@ function groupDeckCards(cards) {
   return [...map.values()];
 }
 
-function loadCardImageForCanvas(card) {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = CARD_IMAGE_PROXY
-      ? CARD_IMAGE_PROXY + encodeURIComponent(card.image)
-      : card.image;
-  });
-}
+function renderDeckScreenshot() {
+  const page = document.getElementById("shot-page");
+  page.innerHTML = "";
 
-function roundRectPath(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
+  // ヘッダー（タイトル・プレイヤー情報・枚数・日付）
+  const header = document.createElement("div");
+  header.className = "shot-header";
 
-function wrapTextLines(ctx, text, maxWidth) {
-  const lines = [];
-  let line = "";
-  for (const ch of String(text)) {
-    const test = line + ch;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = ch;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  return lines;
-}
+  const titleEl = document.createElement("div");
+  titleEl.className = "shot-title";
+  titleEl.id = "shot-title-text";
+  titleEl.textContent = document.getElementById("shot-title-input").value.trim() || "WIXOSS デッキ";
+  header.appendChild(titleEl);
 
-// 画像を取得できなかったカードの代替タイル
-function drawTextTile(ctx, x, y, w, h, card) {
-  const colorKey = Object.keys(CARD_TILE_FILL).find(k => (card.color || "").includes(k));
-  roundRectPath(ctx, x, y, w, h, 8);
-  ctx.fillStyle = CARD_TILE_FILL[colorKey] || "#eeeeee";
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "#888";
-  ctx.stroke();
-
-  ctx.fillStyle = "#222";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-
-  ctx.font = `bold 18px ${IMG_FONT}`;
-  const lines = wrapTextLines(ctx, card.name, w - 20).slice(0, 5);
-  const lineH = 24;
-  const startY = y + h / 2 - ((lines.length - 1) * lineH) / 2 + 6;
-  lines.forEach((line, i) => ctx.fillText(line, x + w / 2, startY + i * lineH));
-
-  ctx.font = `12px ${IMG_FONT}`;
-  ctx.fillStyle = "#555";
-  ctx.fillText(card.id, x + w / 2, y + 16); // 下側は枚数バッジと重なるので上に置く
-}
-
-async function renderDeckImage(title) {
-  const sections = [
-    { title: "ルリグデッキ", cards: lrigDeck },
-    { title: "メインデッキ（ライフバースト有）", cards: mainBurst },
-    { title: "メインデッキ（ライフバースト無）", cards: mainNoBurst }
-  ]
-    .filter(sec => sec.cards.length > 0)
-    .map(sec => ({ ...sec, items: groupDeckCards(sec.cards) }));
-
-  if (sections.length === 0) return null;
-
-  // 画像を先にまとめて読み込む（取得できなかったものは null のまま代替表示）
-  const uniqueCards = new Map();
-  sections.forEach(sec => sec.items.forEach(it => uniqueCards.set(it.card.id, it.card)));
-
-  const images = new Map();
-  let failed = 0;
-  await Promise.all([...uniqueCards.values()].map(async card => {
-    const img = await loadCardImageForCanvas(card);
-    if (img) images.set(card.id, img);
-    else failed++;
-  }));
-
-  // レイアウト計算
-  const W = IMG_TILE_W, H = IMG_TILE_H, GAP = IMG_GAP, M = IMG_MARGIN;
-  const width = M * 2 + IMG_COLS * W + (IMG_COLS - 1) * GAP;
-  const HEADER_H = 110;
-  const SECTION_TITLE_H = 46;
-  const SECTION_GAP = 16;
-
-  let height = M + HEADER_H;
-  sections.forEach(sec => {
-    const rows = Math.ceil(sec.items.length / IMG_COLS);
-    sec.rows = rows;
-    height += SECTION_TITLE_H + rows * (H + GAP) - GAP + SECTION_GAP;
-  });
-  height += M - SECTION_GAP;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-
-  // ヘッダー
   const name = localStorage.getItem("playerName") || "";
   const lrig = localStorage.getItem("centerLrig") || "";
   const subParts = [];
   if (name && name !== "未設定") subParts.push(name);
   if (lrig && lrig !== "未設定") subParts.push(`使用ルリグ：${lrig}`);
+  if (subParts.length > 0) {
+    const sub = document.createElement("div");
+    sub.className = "shot-sub";
+    sub.textContent = subParts.join("　/　");
+    header.appendChild(sub);
+  }
 
-  ctx.textBaseline = "alphabetic";
-  ctx.textAlign = "left";
-  ctx.fillStyle = "#222";
-  ctx.font = `bold 44px ${IMG_FONT}`;
-  ctx.fillText(title || "WIXOSS デッキ", M, M + 44);
-
-  ctx.font = `22px ${IMG_FONT}`;
-  ctx.fillStyle = "#555";
-  if (subParts.length > 0) ctx.fillText(subParts.join("　/　"), M, M + 82);
-
-  const mainTotal = mainBurst.length + mainNoBurst.length;
-  ctx.textAlign = "right";
-  ctx.fillText(
-    `メイン ${mainTotal}枚（LB有 ${mainBurst.length} / LB無 ${mainNoBurst.length}）`,
-    width - M, M + 44
-  );
   const d = new Date();
-  ctx.fillText(
-    `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`,
-    width - M, M + 82
-  );
+  const meta = document.createElement("div");
+  meta.className = "shot-meta";
+  meta.textContent =
+    `メイン ${mainBurst.length + mainNoBurst.length}枚（LB有 ${mainBurst.length} / LB無 ${mainNoBurst.length}）` +
+    `　${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
+  header.appendChild(meta);
+  page.appendChild(header);
 
-  ctx.strokeStyle = "#2196f3";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(M, M + HEADER_H - 14);
-  ctx.lineTo(width - M, M + HEADER_H - 14);
-  ctx.stroke();
+  // 各セクション（カード画像＋枚数バッジ）
+  [
+    ["◆ ルリグデッキ", lrigDeck],
+    ["◆ メインデッキ（ライフバースト有）", mainBurst],
+    ["◆ メインデッキ（ライフバースト無）", mainNoBurst]
+  ].forEach(([title, cards]) => {
+    if (cards.length === 0) return;
 
-  // 各セクション
-  let y = M + HEADER_H;
-  sections.forEach(sec => {
-    ctx.textAlign = "left";
-    ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = "#222";
-    ctx.font = `bold 26px ${IMG_FONT}`;
-    ctx.fillText(`◆ ${sec.title}　${sec.cards.length}枚`, M, y + 32);
-    y += SECTION_TITLE_H;
+    const h = document.createElement("div");
+    h.className = "shot-section";
+    h.textContent = `${title}　${cards.length}枚`;
+    page.appendChild(h);
 
-    sec.items.forEach((it, i) => {
-      const col = i % IMG_COLS;
-      const row = Math.floor(i / IMG_COLS);
-      const x = M + col * (W + GAP);
-      const ty = y + row * (H + GAP);
+    const grid = document.createElement("div");
+    grid.className = "shot-grid";
+    groupDeckCards(cards).forEach(({ card, count }) => {
+      const tile = document.createElement("div");
+      tile.className = "shot-tile";
 
-      const img = images.get(it.card.id);
-      if (img) {
-        ctx.save();
-        roundRectPath(ctx, x, ty, W, H, 8);
-        ctx.clip();
-        ctx.drawImage(img, x, ty, W, H);
-        ctx.restore();
-        roundRectPath(ctx, x, ty, W, H, 8);
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = "#bbb";
-        ctx.stroke();
-      } else {
-        drawTextTile(ctx, x, ty, W, H, it.card);
+      const img = document.createElement("img");
+      img.src = card.image;
+      img.alt = card.name;
+      img.draggable = false;
+      tile.appendChild(img);
+
+      if (count > 1) {
+        const badge = document.createElement("span");
+        badge.className = "shot-count";
+        badge.textContent = `×${count}`;
+        tile.appendChild(badge);
       }
-
-      // 2枚以上のカードには枚数バッジ
-      if (it.count > 1) {
-        const bx = x + W - 30;
-        const by = ty + H - 30;
-        ctx.beginPath();
-        ctx.arc(bx, by, 24, 0, Math.PI * 2);
-        ctx.fillStyle = "#e53935";
-        ctx.fill();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "#fff";
-        ctx.stroke();
-        ctx.fillStyle = "#fff";
-        ctx.font = `bold 24px ${IMG_FONT}`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`×${it.count}`, bx, by + 1);
-      }
+      grid.appendChild(tile);
     });
-
-    y += sec.rows * (H + GAP) - GAP + SECTION_GAP;
+    page.appendChild(grid);
   });
-
-  return { canvas, failed, total: uniqueCards.size };
 }
 
-function canvasToBlob(canvas) {
-  return new Promise((resolve, reject) => {
-    try {
-      canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/png");
-    } catch (e) {
-      reject(e);
+// カード1枚の縦横比（63mm × 88mm）
+const SHOT_CARD_RATIO = 88 / 63;
+const SHOT_MAX_TILE_W = 150; // 画面が大きくても、カードをこれ以上は大きくしない(px)
+const SHOT_GAP = 6;          // カード同士のすき間(px)
+
+// 画面に収まる中で、カードを最も大きく並べられる「列数」と「カード幅」を求める。
+//   counts : 各セクション（ルリグ・LB有・LB無）のカードの種類数
+//   W, H   : カードを並べられる領域の幅・高さ(px)
+function computeShotLayout(counts, W, H, gap, maxTileW) {
+  const sections = counts.filter(n => n > 0);
+  if (sections.length === 0) return { cols: 1, tileW: maxTileW };
+
+  const maxCols = Math.max(...sections);
+  let best = null;
+
+  for (let cols = 1; cols <= maxCols; cols++) {
+    const rows = sections.reduce((sum, n) => sum + Math.ceil(n / cols), 0);
+    const widthLimit = (W - (cols - 1) * gap) / cols;
+    const rowGaps = (rows - sections.length) * gap; // セクション内の行間
+    const heightLimit = (H - rowGaps) / (rows * SHOT_CARD_RATIO);
+    const w = Math.min(widthLimit, heightLimit, maxTileW);
+
+    // 大きく並べられる方を優先。同じ大きさなら列数が多い（行数が少ない）方
+    if (!best || w > best.w + 0.01 || (Math.abs(w - best.w) <= 0.01 && cols > best.cols)) {
+      best = { cols, w };
     }
+  }
+  return { cols: best.cols, tileW: Math.max(Math.floor(best.w), 8) };
+}
+
+function outerHeightOf(el) {
+  const cs = getComputedStyle(el);
+  return el.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+}
+
+// デッキ全体が1画面に収まるように、カードの大きさと列数を調整する
+function fitDeckScreenshot() {
+  const modal = document.getElementById("deck-image-modal");
+  const page = document.getElementById("shot-page");
+  const controls = document.getElementById("shot-controls");
+  if (!modal || !page || modal.style.display !== "block") return;
+
+  const vh = Math.min(modal.clientHeight || Infinity, window.innerHeight || Infinity);
+  if (!isFinite(vh) || vh <= 0) return; // 画面の大きさが取れないときは何もしない
+
+  const controlsH = controls.style.display === "none" ? 0 : controls.offsetHeight;
+  page.style.height = `${Math.max(vh - controlsH, 200)}px`;
+
+  const cs = getComputedStyle(page);
+  const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+  const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  const innerW = page.clientWidth - padX;
+  const innerH = page.clientHeight - padY;
+
+  // ヘッダーとセクション見出しの高さを除いた残りに、カードを並べる
+  const grids = [...page.querySelectorAll(".shot-grid")];
+  const fixedH = [...page.children]
+    .filter(el => !el.classList.contains("shot-grid"))
+    .reduce((sum, el) => sum + outerHeightOf(el), 0);
+
+  const counts = grids.map(g => g.children.length);
+  const { cols, tileW } = computeShotLayout(counts, innerW, innerH - fixedH - 4, SHOT_GAP, SHOT_MAX_TILE_W);
+
+  grids.forEach(g => {
+    g.style.gridTemplateColumns = `repeat(${cols}, ${tileW}px)`;
+    g.style.gap = `${SHOT_GAP}px`;
   });
 }
 
-function resetDeckImageModal() {
-  if (deckImageUrl) URL.revokeObjectURL(deckImageUrl);
-  deckImageUrl = null;
-  deckImageBlob = null;
-
-  const preview = document.getElementById("deck-image-preview");
-  preview.style.display = "none";
-  preview.removeAttribute("src");
-  document.getElementById("deck-image-actions").style.display = "none";
-  document.getElementById("deck-image-status").textContent = "";
+function showShotControls(visible) {
+  document.getElementById("shot-controls").style.display = visible ? "" : "none";
+  fitDeckScreenshot(); // 操作ボタンの分だけ使える高さが変わる
 }
+
+window.addEventListener("resize", fitDeckScreenshot);
+window.addEventListener("orientationchange", () => setTimeout(fitDeckScreenshot, 200));
 
 document.getElementById("export-image-btn").onclick = () => {
-  closeModal("export-modal");
-  resetDeckImageModal();
-  document.getElementById("deck-image-title").value = localStorage.getItem("deckImageTitle") || "";
-  openModal("deck-image-modal");
-};
-
-document.getElementById("deck-image-create").onclick = async () => {
-  const btn = document.getElementById("deck-image-create");
-  const status = document.getElementById("deck-image-status");
-  const title = document.getElementById("deck-image-title").value.trim();
-
   if (lrigDeck.length + mainBurst.length + mainNoBurst.length === 0) {
-    status.textContent = "デッキにカードが入っていません。";
+    alert("デッキにカードが入っていません");
     return;
   }
-
-  localStorage.setItem("deckImageTitle", title);
-  resetDeckImageModal();
-  btn.disabled = true;
-  status.textContent = "画像を作成中です…";
-
-  try {
-    const result = await renderDeckImage(title);
-    const blob = await canvasToBlob(result.canvas);
-
-    deckImageBlob = blob;
-    deckImageUrl = URL.createObjectURL(blob);
-    const safeTitle = (title || "wixoss_deck").replace(/[\\/:*?"<>|]/g, "_");
-    deckImageFileName = `${safeTitle}.png`;
-
-    const preview = document.getElementById("deck-image-preview");
-    preview.src = deckImageUrl;
-    preview.style.display = "block";
-    document.getElementById("deck-image-actions").style.display = "block";
-
-    // 共有に対応した端末（主にスマホ）だけ「共有」ボタンを出す
-    const shareBtn = document.getElementById("deck-image-share");
-    const file = new File([blob], deckImageFileName, { type: "image/png" });
-    shareBtn.style.display =
-      navigator.canShare && navigator.canShare({ files: [file] }) ? "" : "none";
-
-    status.textContent = result.failed > 0
-      ? `作成しました。${result.failed}種類のカードは画像を取得できなかったため、カード名の表示で代替しています。`
-      : "作成しました。";
-  } catch (err) {
-    console.error(err);
-    status.textContent = "画像の作成に失敗しました。コンソールを確認してください。";
-  } finally {
-    btn.disabled = false;
-  }
+  closeModal("export-modal");
+  document.getElementById("shot-title-input").value = localStorage.getItem(SHOT_TITLE_KEY) || "";
+  renderDeckScreenshot();
+  openModal("deck-image-modal");
+  document.getElementById("deck-image-modal").scrollTop = 0;
+  showShotControls(true); // 表示後に、1画面に収まる大きさへ調整される
 };
 
-document.getElementById("deck-image-save").onclick = () => {
-  if (!deckImageUrl) return;
-  const a = document.createElement("a");
-  a.href = deckImageUrl;
-  a.download = deckImageFileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+// タイトルは入力に合わせてその場で更新する（ページ全体は作り直さない）
+document.getElementById("shot-title-input").oninput = (e) => {
+  const value = e.target.value.trim();
+  localStorage.setItem(SHOT_TITLE_KEY, value);
+  const titleEl = document.getElementById("shot-title-text");
+  if (titleEl) titleEl.textContent = value || "WIXOSS デッキ";
+  fitDeckScreenshot();
 };
 
-document.getElementById("deck-image-share").onclick = async () => {
-  if (!deckImageBlob) return;
-  const file = new File([deckImageBlob], deckImageFileName, { type: "image/png" });
-  try {
-    await navigator.share({ files: [file], title: deckImageFileName.replace(/\.png$/, "") });
-  } catch (err) {
-    // 共有をキャンセルした場合も含め、何もしない
-    if (err && err.name !== "AbortError") console.error(err);
-  }
+// ボタン類を隠す → 画面のどこかをタップすると元に戻る
+document.getElementById("shot-hide-controls").onclick = () => {
+  showShotControls(false);
+  setTimeout(() => {
+    const modal = document.getElementById("deck-image-modal");
+    const restore = () => {
+      showShotControls(true);
+      modal.removeEventListener("click", restore);
+    };
+    modal.addEventListener("click", restore);
+  }, 0);
 };
 
 document.getElementById("close-deck-image").onclick = () => {
   closeModal("deck-image-modal");
-  resetDeckImageModal();
 };
 
 
 // =========================
 // 初手チェック
-// デッキを40枚（メインデッキ）としてシャッフルし、
-//   1. 初手5枚を引く
-//   2. マリガン（手札から好きな枚数をデッキに戻して同じ枚数を引き直す）をするか選ぶ
-//   3. ライフクロス7枚を展開する
-// の順に進め、ライフクロスに「ダメージを止められるLB」が何枚埋まるかを
-// 実際の展開と、確定した手札を前提にした確率（超幾何分布）で表示する。
+// 画面を開くと、次の順に進む。
+//   1. 現在のデッキ構成での確率表（マリガン・手札に関係なく、ライフクロス7枚に
+//      「ダメージを止められるLB」が何枚入るか）
+//   2. 初手5枚を引く
+//   3. マリガン（手札から好きな枚数をデッキに戻して同じ枚数を引き直す）をするか選ぶ
+//   4. ライフクロス7枚を展開し、実際の展開と、確定した手札を前提にした確率
+//      （超幾何分布）を表示する
 // =========================
 const OPENING_HAND_SIZE = 5;
 const OPENING_LIFE_SIZE = 7;
@@ -2314,21 +2178,37 @@ function buildOpeningEntries() {
   ];
 }
 
+// デッキをシャッフルして展開前の状態にする（最初は「現在のデッキ構成の確率表」を見せる段階）
 function startOpening() {
   const entries = buildOpeningEntries();
   if (entries.length < OPENING_HAND_SIZE + OPENING_LIFE_SIZE) {
     openingState = null;
     return;
   }
-  const deck = shuffleArray(entries);
   openingState = {
-    stage: "hand",
-    hand: deck.splice(0, OPENING_HAND_SIZE),
-    deck,
+    stage: "overview",
+    hand: [],
+    deck: shuffleArray(entries),
     life: [],
     selected: new Set(),
     mulliganCount: 0
   };
+}
+
+// 初手5枚を引く（マリガンの選択へ）
+function dealOpeningHand() {
+  const st = openingState;
+  st.hand = st.deck.splice(0, OPENING_HAND_SIZE);
+  st.selected.clear();
+  st.mulliganCount = 0;
+  st.stage = "hand";
+}
+
+// 引き直し：全部デッキに戻してシャッフルし、新しい初手5枚を引く
+function redrawOpeningHand() {
+  startOpening();
+  if (openingState) dealOpeningHand();
+  renderOpening();
 }
 
 function dealOpeningLife() {
@@ -2485,14 +2365,43 @@ function renderOpening() {
     `メインデッキ ${all.length}枚（LB有 ${lbTotal}枚、うち止められるLB ${stopperTotal}枚）` +
     (all.length !== MAIN_DECK_SIZE ? `　※${MAIN_DECK_SIZE}枚ではありません` : "");
 
-  if (st.stage === "hand") {
-    renderOpeningHandStage(stageEl, all);
+  if (st.stage === "overview") {
+    renderOpeningOverviewStage(stageEl, all);
+  } else if (st.stage === "hand") {
+    renderOpeningHandStage(stageEl);
   } else {
     renderOpeningLifeStage(stageEl);
   }
 }
 
-function renderOpeningHandStage(stageEl, all) {
+// 現在のデッキ構成での確率表（マリガン・手札に関係なく、デッキ全体からライフクロスが決まる場合）
+function renderOpeningOverviewStage(stageEl, all) {
+  const N = all.length;
+  const K = all.filter(e => e.stopper).length;
+
+  stageEl.appendChild(makeOpeningHeading("現在のデッキ構成での確率"));
+  const note = document.createElement("div");
+  note.className = "opening-dist-note";
+  note.textContent =
+    `手札やマリガンは考えず、デッキ${N}枚からライフクロス${OPENING_LIFE_SIZE}枚が決まるときに、` +
+    "止められるLBが何枚入るかの確率です。";
+  stageEl.appendChild(note);
+
+  stageEl.appendChild(makeDistBlock(
+    "ライフクロスに入る「止められるLB」の枚数",
+    hypergeometricDist(N, K, OPENING_LIFE_SIZE), N, K, OPENING_LIFE_SIZE, -1
+  ));
+
+  const actions = document.createElement("div");
+  actions.className = "opening-actions";
+  actions.appendChild(makeOpeningButton(`初手${OPENING_HAND_SIZE}枚を引く`, () => {
+    dealOpeningHand();
+    renderOpening();
+  }));
+  stageEl.appendChild(actions);
+}
+
+function renderOpeningHandStage(stageEl) {
   const st = openingState;
 
   stageEl.appendChild(makeOpeningHeading(`初手${OPENING_HAND_SIZE}枚`));
@@ -2513,14 +2422,6 @@ function renderOpeningHandStage(stageEl, all) {
   stageEl.appendChild(row);
   stageEl.appendChild(makeOpeningLegend());
 
-  const N = all.length;
-  const K = all.filter(e => e.stopper).length;
-  const handStoppers = st.hand.filter(e => e.stopper).length;
-  stageEl.appendChild(makeDistBlock(
-    `初手${OPENING_HAND_SIZE}枚に止められるLBが来る枚数（マリガン前）`,
-    hypergeometricDist(N, K, OPENING_HAND_SIZE), N, K, OPENING_HAND_SIZE, handStoppers
-  ));
-
   const actions = document.createElement("div");
   actions.className = "opening-actions";
   const count = st.selected.size;
@@ -2528,10 +2429,7 @@ function renderOpeningHandStage(stageEl, all) {
     count > 0 ? `選んだ${count}枚をマリガンして、ライフクロスを展開` : "マリガンなしで、ライフクロスを展開",
     confirmOpeningHand
   ));
-  actions.appendChild(makeOpeningButton("初手を引き直す（最初から）", () => {
-    startOpening();
-    renderOpening();
-  }, { sub: true }));
+  actions.appendChild(makeOpeningButton("初手を引き直す（最初から）", redrawOpeningHand, { sub: true }));
   stageEl.appendChild(actions);
 }
 
@@ -2584,10 +2482,7 @@ function renderOpeningLifeStage(stageEl) {
   const actions = document.createElement("div");
   actions.className = "opening-actions";
   actions.appendChild(makeOpeningButton("ライフクロスを引き直す（手札はそのまま）", redealOpeningLife));
-  actions.appendChild(makeOpeningButton("初手から引き直す", () => {
-    startOpening();
-    renderOpening();
-  }, { sub: true }));
+  actions.appendChild(makeOpeningButton("初手から引き直す", redrawOpeningHand, { sub: true }));
   stageEl.appendChild(actions);
 }
 

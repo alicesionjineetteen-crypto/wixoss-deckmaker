@@ -101,7 +101,7 @@
 
     <button id="export-excel-team-btn">チーム戦用シートで出力</button>
     <button id="export-excel-solo-btn">個人戦用シートで出力</button>
-    <button id="export-image-btn">デッキ画像として出力</button>
+    <button id="export-image-btn">デッキ画像（スクリーンショット用）</button>
 
     <hr>
 
@@ -139,26 +139,16 @@
   </div>
 </div>
 
-<div id="deck-image-modal" class="modal">
-  <div class="modal-content image-export-content">
-    <h3>デッキ画像の書き出し</h3>
-
-    <label for="deck-image-title">タイトル（画像の上部に表示）</label>
-    <input id="deck-image-title" type="text" placeholder="例: 白ピルルク">
-
-    <button id="deck-image-create">画像を作成</button>
-    <p id="deck-image-status" class="modal-note"></p>
-
-    <img id="deck-image-preview" alt="デッキ画像" style="display:none;">
-    <div id="deck-image-actions" style="display:none;">
-      <button id="deck-image-save">画像を保存</button>
-      <button id="deck-image-share" style="display:none;">共有</button>
+<div id="deck-image-modal" class="modal screenshot-modal">
+  <div id="shot-controls" class="shot-controls">
+    <p class="shot-hint">この画面をスクリーンショットすると、デッキの画像として保存・共有できます。デッキは1画面に収まるよう自動で大きさが調整されます。ボタンを写したくないときは「操作を隠す」を押してください（画面をタップすると元に戻ります）。</p>
+    <input id="shot-title-input" type="text" placeholder="タイトル（例: 白ピルルク）">
+    <div class="shot-buttons">
+      <button id="shot-hide-controls" type="button">操作を隠す</button>
+      <button id="close-deck-image" type="button">閉じる</button>
     </div>
-
-    <hr>
-
-    <button id="close-deck-image">閉じる</button>
   </div>
+  <div id="shot-page" class="shot-page"></div>
 </div>
 
 <div id="opening-modal" class="modal">
