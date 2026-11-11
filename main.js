@@ -482,6 +482,9 @@ let restoringDeck = false;
 // ルリグデッキに入るカード種別
 const LRIG_DECK_TYPES = ["ルリグ", "アーツ", "ピース"];
 
+// ルリグデッキに入れられる同名カードの上限
+const LRIG_COPY_LIMIT = 1;
+
 function isLrigDeckCard(card) {
   return LRIG_DECK_TYPES.some(t => card.type.includes(t));
 }
@@ -513,7 +516,7 @@ function refreshDeckDisplay() {
 }
 
 // =========================
-// デッキ内カードのタップ（1枚削除）／長押し（枚数指定で追加）
+// デッキ内カードのタップ（1枚削除）／長押し（枚数選択ポップアップ）
 // Pointer Eventsでタッチ・マウスを一本化（二重発火・誤スクロール削除対策）
 // =========================
 function attachDeckCardEvents(img, card, allowLongPress) {
@@ -568,8 +571,8 @@ function attachDeckCardEvents(img, card, allowLongPress) {
 }
 
 // =========================
-// 長押し時の「枚数選択」ポップアップ
-// 全部で何枚入れるか（0〜4枚）をドロップダウンで選び、OKでその枚数に揃える
+// 長押し時の「枚数選択」ポップアップ（メインデッキ・ルリグデッキ共通）
+// 全部で何枚入れるか（メイン0〜4枚、ルリグ0〜1枚）をドロップダウンで選び、OKでその枚数に揃える
 // ポップアップのHTMLはJSから生成するので、index.html / CSS の変更は不要
 // =========================
 const MAX_COPIES = 4;
@@ -587,12 +590,15 @@ function buildQuantityModal() {
   box.style.cssText =
     "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);" +
     "background:#fff;color:#222;border-radius:12px;padding:16px;" +
-    "width:min(86vw,300px);box-sizing:border-box;text-align:center;" +
+    "width:min(90vw,340px);max-height:92vh;overflow-y:auto;box-sizing:border-box;text-align:center;" +
     "box-shadow:0 4px 20px rgba(0,0,0,0.4);";
 
   const img = document.createElement("img");
   img.id = "quantity-card-img";
-  img.style.cssText = "width:110px;max-width:40%;border-radius:6px;margin-bottom:8px;";
+  // カード画像は大きめに表示する（縦に長い画面でもはみ出さないよう高さも制限）
+  img.style.cssText =
+    "display:block;margin:0 auto 10px;width:min(64vw,230px);max-height:44vh;" +
+    "object-fit:contain;border-radius:8px;";
 
   const title = document.createElement("div");
   title.id = "quantity-title";
@@ -600,18 +606,19 @@ function buildQuantityModal() {
 
   const label = document.createElement("label");
   label.style.cssText = "display:block;margin-bottom:14px;";
-  label.appendChild(document.createTextNode("デッキに入れる枚数："));
+  const labelText = document.createElement("span");
+  labelText.id = "quantity-label-text";
+  label.appendChild(labelText);
 
+  // 選択肢は、開くたびにカードの種類（メイン／ルリグ）に合わせて作る
   const select = document.createElement("select");
   select.id = "quantity-select";
   select.style.cssText = "font-size:16px;padding:6px 10px;";
-  for (let i = 0; i <= MAX_COPIES; i++) {
-    const opt = document.createElement("option");
-    opt.value = String(i);
-    opt.textContent = i === 0 ? "0枚（デッキから外す）" : `${i}枚`;
-    select.appendChild(opt);
-  }
   label.appendChild(select);
+
+  const note = document.createElement("div");
+  note.id = "quantity-note";
+  note.style.cssText = "font-size:12px;color:#777;margin:-6px 0 14px;";
 
   const btnRow = document.createElement("div");
   btnRow.style.cssText = "display:flex;gap:10px;justify-content:center;";
@@ -628,7 +635,7 @@ function buildQuantityModal() {
     const total = parseInt(select.value, 10);
     const card = quantityTargetCard;
     closeQuantityModal();
-    if (card) setMainCopies(card, total);
+    if (card) setDeckCopies(card, total);
   };
 
   [cancelBtn, okBtn].forEach(b => {
@@ -636,7 +643,7 @@ function buildQuantityModal() {
   });
 
   btnRow.append(cancelBtn, okBtn);
-  box.append(img, title, label, btnRow);
+  box.append(img, title, label, note, btnRow);
   overlay.appendChild(box);
 
   // 背景タップで閉じる（長押しした指を離した瞬間の誤クローズを防ぐため、開いた直後は無視）
@@ -656,34 +663,64 @@ function closeQuantityModal() {
   quantityTargetCard = null;
 }
 
-// 長押し時に呼ばれる（旧：prompt で枚数入力）
+// デッキ内の同名カードの枚数（ルリグデッキのカードはルリグデッキ内、それ以外はメインデッキ内）
+function currentCopiesInDeck(card) {
+  if (isLrigDeckCard(card)) return countByName(lrigDeck, card.name);
+  return countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
+}
+
+// 長押し時に呼ばれる
 function promptAddMore(card) {
   if (!quantityModalEl) quantityModalEl = buildQuantityModal();
 
-  const currentTotal = countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
+  const lrig = isLrigDeckCard(card);
+  const max = lrig ? LRIG_COPY_LIMIT : MAX_COPIES;
+  const currentTotal = currentCopiesInDeck(card);
+
+  // 選択肢（0枚〜上限）を作り直す
+  const select = document.getElementById("quantity-select");
+  select.innerHTML = "";
+  for (let i = 0; i <= max; i++) {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = i === 0 ? "0枚（デッキから外す）" : `${i}枚`;
+    select.appendChild(opt);
+  }
+  select.value = String(Math.min(currentTotal, max));
+
+  document.getElementById("quantity-label-text").textContent =
+    lrig ? "ルリグデッキに入れる枚数：" : "メインデッキに入れる枚数：";
+
+  let noteText = lrig
+    ? `ルリグデッキは同名${LRIG_COPY_LIMIT}枚までです`
+    : `メインデッキは同名${MAX_COPIES}枚までです`;
+  const ban = lrig ? null : getBanLimit(card);
+  if (ban !== null) noteText += `（制限カード：${ban}枚まで）`;
+  document.getElementById("quantity-note").textContent = noteText;
 
   quantityTargetCard = card;
   quantityOpenedAt = Date.now();
   document.getElementById("quantity-card-img").src = card.image;
   document.getElementById("quantity-title").textContent = card.name;
-  document.getElementById("quantity-select").value = String(Math.min(currentTotal, MAX_COPIES));
 
   openModal("quantity-modal");
 }
 
-// 同名カードの合計枚数が total 枚になるよう、追加または削除する
-function setMainCopies(card, total) {
-  const currentTotal = countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
+// 同名カードの合計枚数が total 枚になるよう、追加または削除する（メイン・ルリグ共通）
+function setDeckCopies(card, total) {
+  const lrig = isLrigDeckCard(card);
+  const currentTotal = currentCopiesInDeck(card);
 
   if (total > currentTotal) {
-    const target = card.burst ? mainBurst : mainNoBurst;
+    const target = lrig ? lrigDeck : (card.burst ? mainBurst : mainNoBurst);
     for (let i = currentTotal; i < total; i++) {
       target.push(card);
     }
   } else if (total < currentTotal) {
     // 末尾の同名カードから順に取り除く
     let toRemove = currentTotal - total;
-    for (const arr of [mainNoBurst, mainBurst]) {
+    const arrays = lrig ? [lrigDeck] : [mainNoBurst, mainBurst];
+    for (const arr of arrays) {
       for (let i = arr.length - 1; i >= 0 && toRemove > 0; i--) {
         if (arr[i].name === card.name) {
           arr.splice(i, 1);
@@ -701,8 +738,8 @@ function setMainCopies(card, total) {
 function addToDeck(card) {
   // 上限チェック：ルリグデッキは同名1枚まで、メインデッキは同名4枚まで
   if (isLrigDeckCard(card)) {
-    if (countByName(lrigDeck, card.name) >= 1) {
-      alert(`「${card.name}」はルリグデッキに1枚までしか入れられません`);
+    if (countByName(lrigDeck, card.name) >= LRIG_COPY_LIMIT) {
+      alert(`「${card.name}」はルリグデッキに${LRIG_COPY_LIMIT}枚までしか入れられません`);
       return;
     }
   } else {
@@ -746,7 +783,7 @@ function removeCard(card) {
 function renderDeckArea(elementId, cards) {
   const container = document.getElementById(elementId);
   container.innerHTML = "";
-  const allowLongPress = elementId !== "lrig-deck";
+  const allowLongPress = true; // メイン・ルリグどちらも、長押しで枚数選択ポップアップを開く
 
   cards.forEach(card => {
     const img = document.createElement("img");
@@ -891,7 +928,7 @@ function getBanLimit(card) {
 
 // 1枚のカードをデッキに入れられる上限
 function getCopyLimit(card) {
-  if (isLrigDeckCard(card)) return 1;
+  if (isLrigDeckCard(card)) return LRIG_COPY_LIMIT;
   const ban = getBanLimit(card);
   return ban !== null ? Math.min(ban, MAX_COPIES) : MAX_COPIES;
 }
@@ -2632,24 +2669,9 @@ function buildShareUrl(code) {
   return `${location.href.split(/[?#]/)[0]}?d=${code}`;
 }
 
-// URLでもコードだけでも受け付ける。読み取れなければ Error を投げる
-function decodeDeckCode(input) {
-  const text = String(input || "").trim();
-  if (!text) throw new Error("コードが空です");
-
-  const m = text.match(/[?&]d=([A-Za-z0-9_-]+)/);
-  const code = m ? m[1] : text.replace(/\s+/g, "");
-
-  let payload;
-  try {
-    payload = JSON.parse(fromBase64Url(code));
-  } catch (e) {
-    throw new Error("デッキコードを読み取れませんでした");
-  }
-  if (!payload || payload.v !== SHARE_CODE_VERSION || !Array.isArray(payload.l) || !Array.isArray(payload.m)) {
-    throw new Error("対応していない形式のデッキコードです");
-  }
-
+// カードID（または「ID*枚数」）の並びから、デッキを組み立てる
+//   lrigTokens / mainTokens : "ID" または "ID*枚数" の配列
+function buildDeckFromTokens(lrigTokens, mainTokens, name) {
   const byId = getCardsById();
   const missing = [];
   let total = 0;
@@ -2673,8 +2695,8 @@ function decodeDeckCode(input) {
     return cards;
   };
 
-  const lrigPart = expand(payload.l);
-  const mainPart = expand(payload.m);
+  const lrigPart = expand(lrigTokens);
+  const mainPart = expand(mainTokens);
 
   // 保存形式に合わせて、ルリグデッキ／メイン(LB有)／メイン(LB無)に振り分ける
   const deck = { lrigDeck: [], mainBurst: [], mainNoBurst: [] };
@@ -2684,9 +2706,62 @@ function decodeDeckCode(input) {
     else deck.mainNoBurst.push(card);
   });
 
-  deck.name = typeof payload.n === "string" ? payload.n.slice(0, 50) : "";
-  deck.missing = missing;
+  deck.name = typeof name === "string" ? name.slice(0, 50) : "";
+  deck.missing = [...new Set(missing)];
   return deck;
+}
+
+// 公式サイトのデッキレシピURL（…/deck_recipe.php?deckname=…&lrigdeck=ID,ID,…&maindeck=ID,ID,…）を読み取る。
+// そのURLでなければ null
+function parseOfficialDeckRecipe(text) {
+  if (!/(^|[?&])(lrigdeck|maindeck)=/i.test(text)) return null;
+
+  const query = text.slice(text.indexOf("?") + 1).split("#")[0];
+  let params;
+  try {
+    params = new URLSearchParams(text.includes("?") ? query : text);
+  } catch (e) {
+    return null;
+  }
+
+  const toIds = (value) => String(value || "")
+    .split(",")
+    .map(v => v.trim())
+    .filter(Boolean);
+
+  const lrig = toIds(params.get("lrigdeck"));
+  const main = toIds(params.get("maindeck"));
+  if (lrig.length + main.length === 0) return null;
+
+  return { lrig, main, name: (params.get("deckname") || "").trim() };
+}
+
+// URLでもコードだけでも受け付ける。読み取れなければ Error を投げる
+//   ・このサイトの共有URL（?d=…）／デッキコード
+//   ・公式サイトのデッキレシピURL（deck_recipe.php?…）
+function decodeDeckCode(input) {
+  const text = String(input || "").trim();
+  if (!text) throw new Error("コードが空です");
+
+  const official = parseOfficialDeckRecipe(text);
+  if (official) {
+    return buildDeckFromTokens(official.lrig, official.main, official.name);
+  }
+
+  const m = text.match(/[?&]d=([A-Za-z0-9_-]+)/);
+  const code = m ? m[1] : text.replace(/\s+/g, "");
+
+  let payload;
+  try {
+    payload = JSON.parse(fromBase64Url(code));
+  } catch (e) {
+    throw new Error("デッキコードを読み取れませんでした");
+  }
+  if (!payload || payload.v !== SHARE_CODE_VERSION || !Array.isArray(payload.l) || !Array.isArray(payload.m)) {
+    throw new Error("対応していない形式のデッキコードです");
+  }
+
+  return buildDeckFromTokens(payload.l, payload.m, payload.n);
 }
 
 // クリップボードにコピー（非対応なら選択してコピー）
