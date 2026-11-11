@@ -2975,3 +2975,389 @@ document.getElementById("shared-deck-close").onclick = () => {
     // 取り除けなくても動作に影響はない
   }
 })();
+
+
+// =========================
+// プロキシ印刷（A4・63mm × 88mm）
+// デッキのカードを A4 用紙に並べて、ブラウザの印刷機能で印刷する。
+//   ・印刷画面で「PDFとして保存」を選べば、コンビニ印刷用のPDFにもなる
+//   ・カード画像は普通の<img>として並べるだけなので、画像サーバー側の制限を受けない
+//   ・用紙余白・カード間隔・トンボ線（カット用の線）は変更でき、設定はこの端末に保存される
+// 初期値は「余白10mm・カード間隔0mm・トンボ線あり」で、A4に3列×3行（9枚）が並ぶ。
+// =========================
+const PROXY_PAPER_W = 210; // A4の幅(mm)
+const PROXY_PAPER_H = 297; // A4の高さ(mm)
+const PROXY_CARD_W = 63;   // スタンダードサイズ(mm)
+const PROXY_CARD_H = 88;
+const PROXY_DEFAULTS = { margin: 10, gap: 0, marks: true };
+const PROXY_SETTINGS_KEY = "proxyPrintSettings";
+const PROXY_MAX_COUNT = 99;
+
+const PROXY_MARK_LEN = 4;      // トンボ線の長さ(mm)
+const PROXY_MARK_OFFSET = 1;   // カードの端からトンボ線までの距離(mm)
+const PROXY_MARK_EDGE_SAFE = 1; // 用紙の端から確保する距離(mm)
+
+let proxySettings = { ...PROXY_DEFAULTS };
+let proxyItems = [];                      // [{ card, count, section: "lrig" | "main" }]
+let proxyInclude = { lrig: true, main: true };
+
+function clampNumber(value, min, max, fallback) {
+  const n = parseFloat(value);
+  if (!isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function loadProxySettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PROXY_SETTINGS_KEY) || "{}");
+    return {
+      margin: clampNumber(saved.margin, 0, 40, PROXY_DEFAULTS.margin),
+      gap: clampNumber(saved.gap, 0, 20, PROXY_DEFAULTS.gap),
+      marks: typeof saved.marks === "boolean" ? saved.marks : PROXY_DEFAULTS.marks
+    };
+  } catch (e) {
+    return { ...PROXY_DEFAULTS };
+  }
+}
+
+function saveProxySettings() {
+  try {
+    localStorage.setItem(PROXY_SETTINGS_KEY, JSON.stringify(proxySettings));
+  } catch (e) {
+    // 保存できなくても、その場の動作には影響しない
+  }
+}
+
+// 1ページに並べる列数・行数と、並べる位置（中央寄せ）を計算する
+function computeProxyLayout(margin, gap) {
+  const eps = 1e-9;
+  const cols = Math.floor((PROXY_PAPER_W - 2 * margin + gap) / (PROXY_CARD_W + gap) + eps);
+  const rows = Math.floor((PROXY_PAPER_H - 2 * margin + gap) / (PROXY_CARD_H + gap) + eps);
+  if (cols < 1 || rows < 1) {
+    return { cols: 0, rows: 0, perPage: 0, left: 0, top: 0, gridW: 0, gridH: 0 };
+  }
+  const gridW = cols * PROXY_CARD_W + (cols - 1) * gap;
+  const gridH = rows * PROXY_CARD_H + (rows - 1) * gap;
+  return {
+    cols,
+    rows,
+    perPage: cols * rows,
+    left: (PROXY_PAPER_W - gridW) / 2,
+    top: (PROXY_PAPER_H - gridH) / 2,
+    gridW,
+    gridH
+  };
+}
+
+// そのページのカード位置(index)から、カードの左上の位置(mm)を求める
+function proxyCardPosition(layout, gap, index) {
+  const col = index % layout.cols;
+  const row = Math.floor(index / layout.cols);
+  return {
+    x: layout.left + col * (PROXY_CARD_W + gap),
+    y: layout.top + row * (PROXY_CARD_H + gap)
+  };
+}
+
+function uniqueSorted(values) {
+  const seen = new Map();
+  values.forEach(v => seen.set(Math.round(v * 1000), v));
+  return [...seen.values()].sort((a, b) => a - b);
+}
+
+// トンボ線（カット用の線）。カードに重ならないよう、用紙の余白部分にだけ描く
+//   count : そのページに並べるカードの枚数
+// 戻り値: [{ type: "v" | "h", x, y, len }]（mm）
+function computeProxyMarks(layout, gap, count) {
+  const used = Math.min(count, layout.perPage);
+  if (used === 0 || layout.cols === 0) return [];
+
+  const { cols, left, top } = layout;
+  const usedRows = Math.ceil(used / cols);
+  const firstRowCols = Math.min(cols, used);
+  const lastRowCols = used - (usedRows - 1) * cols;
+  const gridRight = left + layout.gridW;
+  const gridBottom = top + usedRows * PROXY_CARD_H + (usedRows - 1) * gap;
+
+  const xEdges = (n) => {
+    const edges = [];
+    for (let c = 0; c < n; c++) {
+      const x0 = left + c * (PROXY_CARD_W + gap);
+      edges.push(x0, x0 + PROXY_CARD_W);
+    }
+    return uniqueSorted(edges);
+  };
+  const yEdges = [];
+  for (let r = 0; r < usedRows; r++) {
+    const y0 = top + r * (PROXY_CARD_H + gap);
+    yEdges.push(y0, y0 + PROXY_CARD_H);
+  }
+  const ys = uniqueSorted(yEdges);
+
+  const lenFor = (available) =>
+    Math.min(PROXY_MARK_LEN, available - PROXY_MARK_OFFSET - PROXY_MARK_EDGE_SAFE);
+  const MIN_LEN = 1.5; // これより短くなる側（余白が小さい側）には描かない
+
+  const marks = [];
+
+  const topLen = lenFor(top);
+  if (topLen >= MIN_LEN) {
+    xEdges(firstRowCols).forEach(x => marks.push({ type: "v", x, y: top - PROXY_MARK_OFFSET - topLen, len: topLen }));
+  }
+  const bottomLen = lenFor(PROXY_PAPER_H - gridBottom);
+  if (bottomLen >= MIN_LEN) {
+    xEdges(lastRowCols).forEach(x => marks.push({ type: "v", x, y: gridBottom + PROXY_MARK_OFFSET, len: bottomLen }));
+  }
+  const leftLen = lenFor(left);
+  if (leftLen >= MIN_LEN) {
+    ys.forEach(y => marks.push({ type: "h", x: left - PROXY_MARK_OFFSET - leftLen, y, len: leftLen }));
+  }
+  const rightLen = lenFor(PROXY_PAPER_W - gridRight);
+  if (rightLen >= MIN_LEN) {
+    ys.forEach(y => marks.push({ type: "h", x: gridRight + PROXY_MARK_OFFSET, y, len: rightLen }));
+  }
+  return marks;
+}
+
+// ---- 印刷するカードの一覧 ----
+function buildProxyItems() {
+  const items = [];
+  groupDeckCards(lrigDeck).forEach(({ card, count }) => items.push({ card, count, section: "lrig" }));
+  groupDeckCards([...mainBurst, ...mainNoBurst]).forEach(({ card, count }) => items.push({ card, count, section: "main" }));
+  return items;
+}
+
+// 印刷するカードを、枚数ぶん並べた配列にする（同じカードは続けて並ぶ）
+function proxyPrintCards() {
+  const cards = [];
+  proxyItems.forEach(item => {
+    if (!proxyInclude[item.section]) return;
+    for (let i = 0; i < item.count; i++) cards.push(item.card);
+  });
+  return cards;
+}
+
+function renderProxyCounts() {
+  const listEl = document.getElementById("proxy-counts");
+  listEl.innerHTML = "";
+
+  proxyItems.forEach(item => {
+    const row = document.createElement("div");
+    row.className = "proxy-count-row" + (proxyInclude[item.section] ? "" : " off");
+
+    const img = document.createElement("img");
+    img.src = item.card.image;
+    img.alt = item.card.name;
+    img.loading = "lazy";
+    img.draggable = false;
+
+    const name = document.createElement("div");
+    name.className = "proxy-count-name";
+    name.appendChild(document.createTextNode(item.card.name));
+    const sub = document.createElement("small");
+    sub.textContent = item.section === "lrig" ? "ルリグデッキ" : "メインデッキ";
+    name.appendChild(sub);
+
+    const stepper = document.createElement("div");
+    stepper.className = "proxy-stepper";
+    const minus = document.createElement("button");
+    minus.type = "button";
+    minus.textContent = "−";
+    const countEl = document.createElement("span");
+    countEl.textContent = String(item.count);
+    const plus = document.createElement("button");
+    plus.type = "button";
+    plus.textContent = "＋";
+
+    const change = (delta) => {
+      item.count = Math.min(PROXY_MAX_COUNT, Math.max(0, item.count + delta));
+      countEl.textContent = String(item.count);
+      renderProxyPreview();
+    };
+    minus.onclick = () => change(-1);
+    plus.onclick = () => change(1);
+
+    stepper.append(minus, countEl, plus);
+    row.append(img, name, stepper);
+    listEl.appendChild(row);
+  });
+}
+
+function buildProxySheet(cards, layout, gap, marks) {
+  const sheet = document.createElement("div");
+  sheet.className = "proxy-sheet";
+
+  cards.forEach((card, i) => {
+    const pos = proxyCardPosition(layout, gap, i);
+    const tile = document.createElement("div");
+    tile.className = "proxy-card";
+    tile.style.left = `${pos.x}mm`;
+    tile.style.top = `${pos.y}mm`;
+
+    const img = document.createElement("img");
+    img.src = card.image;
+    img.alt = card.name;
+    img.draggable = false;
+    tile.appendChild(img);
+    sheet.appendChild(tile);
+  });
+
+  if (marks) {
+    computeProxyMarks(layout, gap, cards.length).forEach(m => {
+      const el = document.createElement("div");
+      el.className = m.type === "v" ? "proxy-tick-v" : "proxy-tick-h";
+      if (m.type === "v") {
+        el.style.left = `${m.x - 0.125}mm`;
+        el.style.top = `${m.y}mm`;
+        el.style.height = `${m.len}mm`;
+      } else {
+        el.style.left = `${m.x}mm`;
+        el.style.top = `${m.y - 0.125}mm`;
+        el.style.width = `${m.len}mm`;
+      }
+      sheet.appendChild(el);
+    });
+  }
+  return sheet;
+}
+
+// 画面表示用の縮小率（実寸のままだとスマホの画面幅を超えるため）
+function proxyPreviewScale() {
+  const modal = document.getElementById("proxy-print-modal");
+  const sheetPx = (PROXY_PAPER_W * 96) / 25.4;
+  const available = (modal.clientWidth || 0) - 24;
+  if (available <= 0) return 1;
+  return Math.min(1, available / sheetPx);
+}
+
+function renderProxyPreview() {
+  const sheetsEl = document.getElementById("proxy-sheets");
+  const summaryEl = document.getElementById("proxy-summary");
+  const warningEl = document.getElementById("proxy-warning");
+  const printBtn = document.getElementById("proxy-print-btn");
+  sheetsEl.innerHTML = "";
+  warningEl.textContent = "";
+
+  const layout = computeProxyLayout(proxySettings.margin, proxySettings.gap);
+  const cards = proxyPrintCards();
+
+  if (layout.perPage === 0) {
+    summaryEl.textContent = "";
+    warningEl.textContent = "用紙余白・カード間隔が大きすぎて、カードを1枚も並べられません。小さくしてください。";
+    printBtn.disabled = true;
+    return;
+  }
+  if (cards.length === 0) {
+    summaryEl.textContent = "印刷するカードがありません。";
+    printBtn.disabled = true;
+    return;
+  }
+
+  const pages = Math.ceil(cards.length / layout.perPage);
+  summaryEl.textContent =
+    `印刷するカード ${cards.length}枚 → A4 ${pages}ページ（1ページ ${layout.perPage}枚：${layout.cols}列×${layout.rows}行）`;
+  printBtn.disabled = false;
+
+  const scale = proxyPreviewScale();
+  for (let p = 0; p < pages; p++) {
+    const pageCards = cards.slice(p * layout.perPage, (p + 1) * layout.perPage);
+
+    const caption = document.createElement("div");
+    caption.className = "proxy-caption";
+    caption.textContent = `${p + 1} / ${pages} ページ`;
+    sheetsEl.appendChild(caption);
+
+    const wrap = document.createElement("div");
+    wrap.className = "proxy-wrap";
+    wrap.style.setProperty("--s", String(scale));
+    wrap.appendChild(buildProxySheet(pageCards, layout, proxySettings.gap, proxySettings.marks));
+    sheetsEl.appendChild(wrap);
+  }
+}
+
+function syncProxyInputs() {
+  document.getElementById("proxy-margin").value = String(proxySettings.margin);
+  document.getElementById("proxy-gap").value = String(proxySettings.gap);
+  document.getElementById("proxy-marks").checked = proxySettings.marks;
+}
+
+function openProxyPrint() {
+  if (lrigDeck.length + mainBurst.length + mainNoBurst.length === 0) {
+    alert("デッキにカードが入っていません");
+    return;
+  }
+  proxySettings = loadProxySettings();
+  proxyItems = buildProxyItems();
+  proxyInclude = { lrig: true, main: true };
+  document.getElementById("proxy-include-lrig").checked = true;
+  document.getElementById("proxy-include-main").checked = true;
+  syncProxyInputs();
+
+  document.body.classList.add("proxy-open"); // 印刷時に、この画面だけを出力するための目印
+  openModal("proxy-print-modal");
+  document.getElementById("proxy-print-modal").scrollTop = 0;
+  renderProxyCounts();
+  renderProxyPreview();
+}
+
+document.getElementById("open-proxy-print").onclick = openProxyPrint;
+
+document.getElementById("close-proxy").onclick = () => {
+  document.body.classList.remove("proxy-open");
+  closeModal("proxy-print-modal");
+};
+
+document.getElementById("proxy-margin").oninput = (e) => {
+  if (e.target.value === "") return;
+  proxySettings.margin = clampNumber(e.target.value, 0, 40, PROXY_DEFAULTS.margin);
+  saveProxySettings();
+  renderProxyPreview();
+};
+document.getElementById("proxy-gap").oninput = (e) => {
+  if (e.target.value === "") return;
+  proxySettings.gap = clampNumber(e.target.value, 0, 20, PROXY_DEFAULTS.gap);
+  saveProxySettings();
+  renderProxyPreview();
+};
+document.getElementById("proxy-marks").onchange = (e) => {
+  proxySettings.marks = e.target.checked;
+  saveProxySettings();
+  renderProxyPreview();
+};
+
+document.getElementById("proxy-reset-settings").onclick = () => {
+  proxySettings = { ...PROXY_DEFAULTS };
+  saveProxySettings();
+  syncProxyInputs();
+  renderProxyPreview();
+};
+
+document.getElementById("proxy-include-lrig").onchange = (e) => {
+  proxyInclude.lrig = e.target.checked;
+  renderProxyCounts();
+  renderProxyPreview();
+};
+document.getElementById("proxy-include-main").onchange = (e) => {
+  proxyInclude.main = e.target.checked;
+  renderProxyCounts();
+  renderProxyPreview();
+};
+
+document.getElementById("proxy-reset-counts").onclick = () => {
+  proxyItems = buildProxyItems();
+  renderProxyCounts();
+  renderProxyPreview();
+};
+
+document.getElementById("proxy-print-btn").onclick = () => {
+  if (proxyPrintCards().length === 0) return;
+  window.print();
+};
+
+// 画面の向きや大きさが変わったら、プレビューの縮小率だけを合わせ直す（作り直さない）
+window.addEventListener("resize", () => {
+  const modal = document.getElementById("proxy-print-modal");
+  if (!modal || modal.style.display !== "block") return;
+  const scale = String(proxyPreviewScale());
+  modal.querySelectorAll(".proxy-wrap").forEach(wrap => wrap.style.setProperty("--s", scale));
+});

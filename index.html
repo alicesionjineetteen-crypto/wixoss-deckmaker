@@ -32,6 +32,7 @@
   <button id="open-settings">設定を開く</button>
   <button id="open-opening-check" style="margin-left:8px;">🎲 初手チェック</button>
   <button id="open-share" style="margin-left:8px;">🔗 デッキ共有</button>
+  <button id="open-proxy-print" style="margin-left:8px;">🖨 プロキシ印刷</button>
   <a href="playtest.html" id="open-playtest" style="display:inline-block;margin-left:8px;">🎮 一人回し</a>
   <a href="versus.html" id="open-versus" style="display:inline-block;margin-left:8px;">⚔ 対戦盤面</a>
   <a href="battle.html" id="open-battle" style="display:inline-block;margin-left:8px;">⚙ ルール自動対戦</a>
@@ -216,6 +217,55 @@
     <button id="shared-deck-save">保存する</button>
     <button id="shared-deck-close">閉じる</button>
   </div>
+</div>
+
+<div id="proxy-print-modal" class="modal proxy-modal">
+  <div class="proxy-controls">
+    <h3>プロキシ印刷（A4・63mm×88mm）</h3>
+    <p class="modal-note">デッキのカードをA4用紙に並べて印刷します。印刷画面で「PDFとして保存」を選べば、コンビニ印刷用のPDFも作れます。</p>
+
+    <div class="proxy-settings">
+      <label>用紙余白（mm）
+        <input id="proxy-margin" type="number" inputmode="decimal" min="0" max="40" step="0.5">
+      </label>
+      <label>カード間隔（mm）
+        <input id="proxy-gap" type="number" inputmode="decimal" min="0" max="20" step="0.5">
+      </label>
+      <label class="proxy-check">
+        <input id="proxy-marks" type="checkbox"> トンボ線（カット用の線）を入れる
+      </label>
+      <button id="proxy-reset-settings" type="button" class="proxy-sub">設定を初期値に戻す</button>
+    </div>
+
+    <div class="proxy-include">
+      <label class="proxy-check"><input id="proxy-include-lrig" type="checkbox" checked> ルリグデッキを印刷</label>
+      <label class="proxy-check"><input id="proxy-include-main" type="checkbox" checked> メインデッキを印刷</label>
+    </div>
+
+    <details id="proxy-counts-details">
+      <summary>カードごとの印刷枚数を調整（持っているカードは0枚に）</summary>
+      <div id="proxy-counts"></div>
+      <button id="proxy-reset-counts" type="button" class="proxy-sub">デッキの枚数にそろえる</button>
+    </details>
+
+    <p id="proxy-summary" class="proxy-summary"></p>
+    <p id="proxy-warning" class="proxy-warning"></p>
+
+    <div class="proxy-buttons">
+      <button id="proxy-print-btn" type="button">印刷 / PDFとして保存</button>
+      <button id="close-proxy" type="button" class="proxy-sub">閉じる</button>
+    </div>
+
+    <p class="modal-note">
+      印刷画面では「倍率 100%（実際のサイズ）」「余白: なし（または最小）」「ヘッダーとフッター: オフ」を選んでください。
+      印刷したら、トンボ線に合わせて切り、スリーブに入れて使います。
+    </p>
+    <p class="modal-note">
+      個人での練習・対戦テスト用です。画像の著作権・利用規約と、使用する大会やお店のルールを守ってください。
+    </p>
+  </div>
+
+  <div id="proxy-sheets" class="proxy-sheets"></div>
 </div>
 
 <div id="search-area">
