@@ -3303,6 +3303,7 @@ function openProxyPrint() {
 document.getElementById("open-proxy-print").onclick = openProxyPrint;
 
 document.getElementById("close-proxy").onclick = () => {
+  restoreViewport();
   document.body.classList.remove("proxy-open");
   closeModal("proxy-print-modal");
 };
@@ -3349,9 +3350,31 @@ document.getElementById("proxy-reset-counts").onclick = () => {
   renderProxyPreview();
 };
 
+// スマホのブラウザは、印刷のときも「画面の幅」を基準にページを縮めてしまうことがある。
+// 印刷の間だけ、画面の幅をA4用紙の幅（210mm ≒ 794px）に合わせて、実寸で出るようにする。
+let savedViewportContent = null;
+
+function useA4Viewport() {
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta || savedViewportContent !== null) return;
+  savedViewportContent = meta.getAttribute("content") || "";
+  meta.setAttribute("content", "width=794, initial-scale=1");
+}
+
+function restoreViewport() {
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta || savedViewportContent === null) return;
+  meta.setAttribute("content", savedViewportContent);
+  savedViewportContent = null;
+}
+
+window.addEventListener("afterprint", restoreViewport);
+
 document.getElementById("proxy-print-btn").onclick = () => {
   if (proxyPrintCards().length === 0) return;
-  window.print();
+  useA4Viewport();
+  // 画面の幅の切り替えが反映されてから、印刷画面を開く
+  setTimeout(() => window.print(), 150);
 };
 
 // 画面の向きや大きさが変わったら、プレビューの縮小率だけを合わせ直す（作り直さない）
