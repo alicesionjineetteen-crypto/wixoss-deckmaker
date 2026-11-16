@@ -590,14 +590,14 @@ function buildQuantityModal() {
   box.style.cssText =
     "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);" +
     "background:#fff;color:#222;border-radius:12px;padding:16px;" +
-    "width:min(90vw,340px);max-height:92vh;overflow-y:auto;box-sizing:border-box;text-align:center;" +
+    "width:min(92vw,360px);max-height:94vh;overflow-y:auto;box-sizing:border-box;text-align:center;" +
     "box-shadow:0 4px 20px rgba(0,0,0,0.4);";
 
   const img = document.createElement("img");
   img.id = "quantity-card-img";
   // カード画像は大きめに表示する（縦に長い画面でもはみ出さないよう高さも制限）
   img.style.cssText =
-    "display:block;margin:0 auto 10px;width:min(64vw,230px);max-height:44vh;" +
+    "display:block;margin:0 auto 10px;width:min(80vw,300px);max-height:52vh;" +
     "object-fit:contain;border-radius:8px;";
 
   const title = document.createElement("div");
