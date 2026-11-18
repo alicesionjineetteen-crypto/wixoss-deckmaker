@@ -1073,3 +1073,76 @@ body {
     box-shadow: none !important;
   }
 }
+
+/* ===== 公式ID未登録カードの対応づけ ===== */
+.unresolved-row {
+  margin: 8px 0;
+  padding: 8px;
+  background: #fff8e1;
+  border: 1px solid #ffcc80;
+  border-radius: 8px;
+}
+.unresolved-head {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: bold;
+  word-break: break-all;
+}
+.unresolved-body {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.unresolved-img {
+  width: 84px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: #eee;
+}
+.unresolved-side {
+  flex: 1;
+  min-width: 0;
+}
+.unresolved-side input {
+  margin: 0 0 4px;
+}
+.alias-results {
+  font-size: 13px;
+  color: #666;
+}
+.alias-candidate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  color: #222;
+  cursor: pointer;
+}
+.alias-candidate img {
+  width: 34px;
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+.alias-candidate small {
+  display: block;
+  color: #888;
+}
+.alias-applied {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #eee;
+}
+.alias-applied span {
+  flex: 1;
+  word-break: break-all;
+}
+.alias-applied button {
+  padding: 4px 10px;
+}

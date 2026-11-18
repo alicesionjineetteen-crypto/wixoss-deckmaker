@@ -388,23 +388,46 @@ function matchesAdvancedFilters(card, f) {
   return true;
 }
 
+// 検索用の正規化：大文字小文字を区別せず、全角の英数字・記号は半角として扱う
+function normalizeSearchText(text) {
+  return String(text || "")
+    .replace(/[\uFF01-\uFF5E]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/\u3000/g, " ")
+    .toLowerCase();
+}
+
+// カード名・ID・テキストをまとめた検索用の文字列（カードごとに1回だけ作る）
+// 項目の境目は改行で区切り、別々の項目にまたがって一致しないようにする
+// （カードのオブジェクト自体には書き込まない。保存データに紛れ込んでしまうため）
+const searchHaystackCache = new Map();
+function getSearchHaystack(card) {
+  let hay = searchHaystackCache.get(card.id);
+  if (hay === undefined) {
+    hay = [card.name, card.id, card.text].map(normalizeSearchText).join("\n");
+    searchHaystackCache.set(card.id, hay);
+  }
+  return hay;
+}
+
+// スペース（全角も可）で区切った語を、すべて含むカードだけを探す（AND検索）
+function parseSearchTerms(query) {
+  return normalizeSearchText(query).split(/\s+/).filter(Boolean);
+}
+
 function runSearch() {
-  const q = document.getElementById("search-box").value.toLowerCase();
+  const terms = parseSearchTerms(document.getElementById("search-box").value);
   const filters = getAdvancedFilters();
 
-  if (q === "" && !hasActiveAdvancedFilters(filters)) {
+  if (terms.length === 0 && !hasActiveAdvancedFilters(filters)) {
     renderCards([]);
     return;
   }
 
   const filtered = allCards.filter(c => {
-    const matchesKeyword =
-      q === "" ||
-      c.name.toLowerCase().includes(q) ||
-      c.id.toLowerCase().includes(q) ||
-      (c.text && c.text.toLowerCase().includes(q));
-
-    if (!matchesKeyword) return false;
+    if (terms.length > 0) {
+      const hay = getSearchHaystack(c);
+      if (!terms.every(term => hay.includes(term))) return false;
+    }
     return matchesAdvancedFilters(c, filters);
   });
 
@@ -593,12 +616,54 @@ function buildQuantityModal() {
     "width:min(92vw,360px);max-height:94vh;overflow-y:auto;box-sizing:border-box;text-align:center;" +
     "box-shadow:0 4px 20px rgba(0,0,0,0.4);";
 
+  // カード画像（左右に「前のカード／次のカード」ボタン。左右スワイプでも移動できる）
+  const imgWrap = document.createElement("div");
+  imgWrap.style.cssText =
+    "position:relative;margin:0 auto 6px;width:min(80vw,300px);touch-action:pan-y;";
+
   const img = document.createElement("img");
   img.id = "quantity-card-img";
   // カード画像は大きめに表示する（縦に長い画面でもはみ出さないよう高さも制限）
   img.style.cssText =
-    "display:block;margin:0 auto 10px;width:min(80vw,300px);max-height:52vh;" +
-    "object-fit:contain;border-radius:8px;";
+    "display:block;width:100%;max-height:52vh;object-fit:contain;border-radius:8px;";
+  img.draggable = false;
+
+  const makeNavButton = (id, text, label, side, delta) => {
+    const b = document.createElement("button");
+    b.id = id;
+    b.type = "button";
+    b.textContent = text;
+    b.setAttribute("aria-label", label);
+    b.title = label;
+    b.style.cssText =
+      `position:absolute;top:50%;${side}:4px;transform:translateY(-50%);` +
+      "width:40px;height:40px;padding:0;border:none;border-radius:50%;" +
+      "background:rgba(0,0,0,0.55);color:#fff;font-size:28px;line-height:1;";
+    b.onclick = () => navigateQuantity(delta);
+    return b;
+  };
+  const prevBtn = makeNavButton("quantity-prev", "‹", "前のカード", "left", -1);
+  const nextBtn = makeNavButton("quantity-next", "›", "次のカード", "right", 1);
+
+  // 左右にスワイプしても、前後のカードへ移動できる
+  let swipeStart = null;
+  imgWrap.addEventListener("pointerdown", (e) => {
+    swipeStart = { x: e.clientX, y: e.clientY };
+  });
+  imgWrap.addEventListener("pointerup", (e) => {
+    if (!swipeStart) return;
+    const dx = e.clientX - swipeStart.x;
+    const dy = e.clientY - swipeStart.y;
+    swipeStart = null;
+    if (Math.abs(dx) >= 50 && Math.abs(dy) < 50) navigateQuantity(dx < 0 ? 1 : -1);
+  });
+  imgWrap.addEventListener("pointercancel", () => { swipeStart = null; });
+
+  imgWrap.append(img, prevBtn, nextBtn);
+
+  const position = document.createElement("div");
+  position.id = "quantity-position";
+  position.style.cssText = "font-size:12px;color:#777;margin-bottom:2px;";
 
   const title = document.createElement("div");
   title.id = "quantity-title";
@@ -618,7 +683,12 @@ function buildQuantityModal() {
 
   const note = document.createElement("div");
   note.id = "quantity-note";
-  note.style.cssText = "font-size:12px;color:#777;margin:-6px 0 14px;";
+  note.style.cssText = "font-size:12px;color:#777;margin:-6px 0 6px;";
+
+  const navHint = document.createElement("div");
+  navHint.id = "quantity-navhint";
+  navHint.style.cssText = "font-size:11px;color:#999;margin:0 0 14px;";
+  navHint.textContent = "‹ › やスワイプで前後のカードへ（変えた枚数は、移動するときに反映されます）";
 
   const btnRow = document.createElement("div");
   btnRow.style.cssText = "display:flex;gap:10px;justify-content:center;";
@@ -643,7 +713,7 @@ function buildQuantityModal() {
   });
 
   btnRow.append(cancelBtn, okBtn);
-  box.append(img, title, label, note, btnRow);
+  box.append(imgWrap, position, title, label, note, navHint, btnRow);
   overlay.appendChild(box);
 
   // 背景タップで閉じる（長押しした指を離した瞬間の誤クローズを防ぐため、開いた直後は無視）
@@ -669,10 +739,21 @@ function currentCopiesInDeck(card) {
   return countByName(mainBurst, card.name) + countByName(mainNoBurst, card.name);
 }
 
-// 長押し時に呼ばれる
-function promptAddMore(card) {
-  if (!quantityModalEl) quantityModalEl = buildQuantityModal();
+// ポップアップに表示するカードの並び（そのカードが入っているデッキ内の、同名をまとめた一覧）
+function quantityNavList(card) {
+  const source = isLrigDeckCard(card) ? lrigDeck : [...mainBurst, ...mainNoBurst];
+  const seen = new Set();
+  const list = [];
+  source.forEach(c => {
+    if (seen.has(c.name)) return;
+    seen.add(c.name);
+    list.push(c);
+  });
+  return list;
+}
 
+// ポップアップの中身を、指定したカードに切り替える
+function showQuantityCard(card) {
   const lrig = isLrigDeckCard(card);
   const max = lrig ? LRIG_COPY_LIMIT : MAX_COPIES;
   const currentTotal = currentCopiesInDeck(card);
@@ -699,12 +780,62 @@ function promptAddMore(card) {
   document.getElementById("quantity-note").textContent = noteText;
 
   quantityTargetCard = card;
-  quantityOpenedAt = Date.now();
   document.getElementById("quantity-card-img").src = card.image;
   document.getElementById("quantity-title").textContent = card.name;
 
+  // 「3 / 12」の表示と、前後のカードへ移動するボタンの状態
+  const list = quantityNavList(card);
+  const index = list.findIndex(c => c.name === card.name);
+  document.getElementById("quantity-position").textContent =
+    list.length > 1 && index >= 0 ? `${index + 1} / ${list.length}（${lrig ? "ルリグデッキ" : "メインデッキ"}）` : "";
+  document.getElementById("quantity-prev").disabled = !(index > 0);
+  document.getElementById("quantity-next").disabled = !(index >= 0 && index < list.length - 1);
+  document.getElementById("quantity-prev").style.opacity = index > 0 ? "1" : "0.25";
+  document.getElementById("quantity-next").style.opacity = index >= 0 && index < list.length - 1 ? "1" : "0.25";
+  document.getElementById("quantity-navhint").style.display = list.length > 1 ? "" : "none";
+}
+
+// 前(-1)・次(1)のカードへ移動する。選んでいた枚数が現在と違えば、先に反映する
+function navigateQuantity(delta) {
+  const card = quantityTargetCard;
+  if (!card || !quantityModalEl || quantityModalEl.style.display !== "block") return;
+
+  const list = quantityNavList(card);
+  const index = list.findIndex(c => c.name === card.name);
+  const target = list[index + delta];
+  if (index < 0 || !target) return;
+
+  const total = parseInt(document.getElementById("quantity-select").value, 10);
+  if (total !== currentCopiesInDeck(card)) setDeckCopies(card, total);
+
+  showQuantityCard(target);
+}
+
+// 長押し時に呼ばれる
+function promptAddMore(card) {
+  if (!quantityModalEl) quantityModalEl = buildQuantityModal();
+
+  showQuantityCard(card);
+  quantityOpenedAt = Date.now();
   openModal("quantity-modal");
 }
+
+// PC用: 左右キーで前後のカードへ、Escで閉じる
+document.addEventListener("keydown", (e) => {
+  if (!quantityModalEl || quantityModalEl.style.display !== "block") return;
+  const t = e.target;
+  if (t && (t.tagName === "SELECT" || t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    navigateQuantity(-1);
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    navigateQuantity(1);
+  } else if (e.key === "Escape") {
+    closeQuantityModal();
+  }
+});
 
 // 同名カードの合計枚数が total 枚になるよう、追加または削除する（メイン・ルリグ共通）
 function setDeckCopies(card, total) {
@@ -2673,7 +2804,10 @@ function buildShareUrl(code) {
 //   lrigTokens / mainTokens : "ID" または "ID*枚数" の配列
 function buildDeckFromTokens(lrigTokens, mainTokens, name) {
   const byId = getCardsById();
+  const aliases = loadCardAliases();
   const missing = [];
+  const missingCounts = {}; // 読み込めなかったIDごとの枚数
+  const aliasedMap = {};    // 保存済みの対応づけで読み込めたIDごとの情報
   let total = 0;
 
   const expand = (list) => {
@@ -2685,10 +2819,19 @@ function buildDeckFromTokens(lrigTokens, mainTokens, name) {
       total += count;
       if (total > SHARE_MAX_CARDS) throw new Error("カードの枚数が多すぎます");
 
-      const card = byId.get(id);
+      let card = byId.get(id);
       if (!card) {
-        missing.push(id);
-        return;
+        // このサイトのデータにないIDは、以前に選んだ「同名のカード」への対応づけがあれば、それを使う
+        const aliasTo = aliases[id];
+        if (aliasTo && byId.has(aliasTo)) {
+          card = byId.get(aliasTo);
+          if (!aliasedMap[id]) aliasedMap[id] = { from: id, to: aliasTo, card, count: 0 };
+          aliasedMap[id].count += count;
+        } else {
+          missing.push(id);
+          missingCounts[id] = (missingCounts[id] || 0) + count;
+          return;
+        }
       }
       for (let i = 0; i < count; i++) cards.push(card);
     });
@@ -2708,7 +2851,53 @@ function buildDeckFromTokens(lrigTokens, mainTokens, name) {
 
   deck.name = typeof name === "string" ? name.slice(0, 50) : "";
   deck.missing = [...new Set(missing)];
+  deck.missingCounts = missingCounts;
+  deck.aliased = Object.values(aliasedMap);
+  // 対応づけを変えたときに、同じ内容から組み立て直せるよう元の並びも持っておく
+  deck.source = { lrigTokens: [...lrigTokens], mainTokens: [...mainTokens] };
   return deck;
+}
+
+// ---- 公式IDとこのサイトのカードの対応づけ ----
+// 公式のデッキレシピに含まれるIDが、このサイトのカードデータ(card_info.js)にないとき
+// （主にプロモカード）、「同名のカード」を自分で選んで対応づけておくと、次回から自動で読み込まれる。
+const CARD_ALIAS_KEY = "cardIdAliases";
+
+function loadCardAliases() {
+  try {
+    const o = JSON.parse(localStorage.getItem(CARD_ALIAS_KEY) || "{}");
+    return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveCardAliases(aliases) {
+  try {
+    localStorage.setItem(CARD_ALIAS_KEY, JSON.stringify(aliases));
+  } catch (e) {
+    // 保存できなくても、その場の読み込みには影響しない
+  }
+}
+
+// 公式サイトのカード画像のURL（このサイトのデータにないIDでも、IDから作れる）
+function officialCardImageUrl(id) {
+  return `https://www.takaratomy.co.jp/products/wixoss/img/card/${String(id).split("-")[0]}/${id}.jpg`;
+}
+
+// カード名やIDの一部（スペース区切りでAND）から、対応づけの候補を探す
+function searchCardsForAlias(query, limit = 8) {
+  const terms = parseSearchTerms(query);
+  if (terms.length === 0) return [];
+  const results = [];
+  for (const c of allCards) {
+    const hay = normalizeSearchText(`${c.name}\n${c.id}`);
+    if (terms.every(t => hay.includes(t))) {
+      results.push(c);
+      if (results.length >= limit) break;
+    }
+  }
+  return results;
 }
 
 // 公式サイトのデッキレシピURL（…/deck_recipe.php?deckname=…&lrigdeck=ID,ID,…&maindeck=ID,ID,…）を読み取る。
@@ -2849,19 +3038,146 @@ document.getElementById("close-share").onclick = () => {
 // ---- 共有されたデッキの確認（読み込み・保存） ----
 let sharedDeckPending = null;
 
-function openSharedDeckPreview(deck) {
-  sharedDeckPending = deck;
+// 読み込めなかったカードごとに、公式の画像と「同名のカードを選ぶ」欄を出す
+function renderSharedUnresolved(deck) {
+  const box = document.getElementById("shared-deck-unresolved");
+  box.innerHTML = "";
+  if (deck.missing.length === 0) return;
 
+  const totalCards = deck.missing.reduce((sum, id) => sum + (deck.missingCounts[id] || 0), 0);
+  const intro = document.createElement("p");
+  intro.className = "modal-note shared-unresolved-intro";
+  intro.textContent =
+    `このサイトのカードデータにないカードが${deck.missing.length}種類（${totalCards}枚）あります。` +
+    "公式の画像を見て、同名のカードを選ぶとデッキに入ります（選んだ対応は覚えておき、次回から自動で読み込みます）。";
+  box.appendChild(intro);
+
+  deck.missing.forEach(id => {
+    const row = document.createElement("div");
+    row.className = "unresolved-row";
+
+    const head = document.createElement("div");
+    head.className = "unresolved-head";
+    head.textContent = `公式のID：${id}　×${deck.missingCounts[id] || 1}枚`;
+    row.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "unresolved-body";
+
+    const img = document.createElement("img");
+    img.className = "unresolved-img";
+    img.src = officialCardImageUrl(id);
+    img.alt = id;
+    img.draggable = false;
+    img.onerror = () => { img.style.visibility = "hidden"; };
+    body.appendChild(img);
+
+    const side = document.createElement("div");
+    side.className = "unresolved-side";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "同名のカードを検索（カード名の一部）";
+    const results = document.createElement("div");
+    results.className = "alias-results";
+
+    input.oninput = () => {
+      results.innerHTML = "";
+      const found = searchCardsForAlias(input.value);
+      if (input.value.trim() !== "" && found.length === 0) {
+        results.textContent = "該当するカードがありません";
+        return;
+      }
+      found.forEach(card => {
+        const item = document.createElement("div");
+        item.className = "alias-candidate";
+
+        const thumb = document.createElement("img");
+        thumb.src = card.image;
+        thumb.alt = card.name;
+        thumb.loading = "lazy";
+        thumb.draggable = false;
+
+        const label = document.createElement("div");
+        label.appendChild(document.createTextNode(card.name));
+        const sub = document.createElement("small");
+        sub.textContent = card.id;
+        label.appendChild(sub);
+
+        item.append(thumb, label);
+        item.onclick = () => resolveMissingCard(id, card);
+        results.appendChild(item);
+      });
+    };
+
+    side.append(input, results);
+    body.appendChild(side);
+    row.appendChild(body);
+    box.appendChild(row);
+  });
+}
+
+// 保存済みの対応づけで読み込めたカードの一覧（間違いは「解除」できる）
+function renderSharedAliased(deck) {
+  const box = document.getElementById("shared-deck-aliased");
+  box.innerHTML = "";
+  if (!deck.aliased || deck.aliased.length === 0) return;
+
+  const intro = document.createElement("p");
+  intro.className = "modal-note";
+  intro.textContent = "前に選んだ対応で、次のカードを読み込みました。";
+  box.appendChild(intro);
+
+  deck.aliased.forEach(item => {
+    const row = document.createElement("div");
+    row.className = "alias-applied";
+
+    const text = document.createElement("span");
+    text.textContent = `${item.from} → 「${item.card.name}」（${item.to}）×${item.count}枚`;
+
+    const undo = document.createElement("button");
+    undo.type = "button";
+    undo.textContent = "解除";
+    undo.onclick = () => removeCardAlias(item.from);
+
+    row.append(text, undo);
+    box.appendChild(row);
+  });
+}
+
+// 読み込めなかったIDを、選んだカードに対応づけて、デッキを組み立て直す
+function resolveMissingCard(missingId, card) {
+  const aliases = loadCardAliases();
+  aliases[missingId] = card.id;
+  saveCardAliases(aliases);
+  rebuildSharedDeck();
+}
+
+function removeCardAlias(missingId) {
+  const aliases = loadCardAliases();
+  delete aliases[missingId];
+  saveCardAliases(aliases);
+  rebuildSharedDeck();
+}
+
+function rebuildSharedDeck() {
+  const old = sharedDeckPending;
+  if (!old || !old.source) return;
+  sharedDeckPending = buildDeckFromTokens(old.source.lrigTokens, old.source.mainTokens, old.name);
+  renderSharedDeckPreview(sharedDeckPending);
+}
+
+// 確認画面の中身を作る（画面を開く処理は含まない）
+function renderSharedDeckPreview(deck) {
   const mainTotal = deck.mainBurst.length + deck.mainNoBurst.length;
   document.getElementById("shared-deck-summary").textContent =
     (deck.name ? `「${deck.name}」` : "（名前なし）") +
     `　ルリグデッキ ${deck.lrigDeck.length}枚 ／ メインデッキ ${mainTotal}枚` +
     `（LB有 ${deck.mainBurst.length} / LB無 ${deck.mainNoBurst.length}）`;
 
-  const warning = document.getElementById("shared-deck-warning");
-  warning.textContent = deck.missing.length > 0
-    ? `このサイトのカードデータにないカードが${deck.missing.length}種類あり、読み込めませんでした（${deck.missing.slice(0, 5).join("、")}${deck.missing.length > 5 ? " など" : ""}）。`
-    : "";
+  document.getElementById("shared-deck-warning").textContent = "";
+  renderSharedUnresolved(deck);
+  renderSharedAliased(deck);
 
   // カードを画像＋枚数バッジで一覧表示
   const listEl = document.getElementById("shared-deck-list");
@@ -2904,7 +3220,11 @@ function openSharedDeckPreview(deck) {
     });
     listEl.appendChild(grid);
   });
+}
 
+function openSharedDeckPreview(deck) {
+  sharedDeckPending = deck;
+  renderSharedDeckPreview(deck);
   document.getElementById("shared-deck-save-name").value = deck.name || "";
   openModal("shared-deck-modal");
 }
