@@ -1443,6 +1443,8 @@ document.getElementById("export-deck-data-btn").onclick = () => {
   const data = {
     savedDecks: getSavedDecks(),
     currentDeck: { lrigDeck, mainBurst, mainNoBurst },
+    // 公式のデッキレシピ用に選んだ「カードの対応づけ」も一緒に保存する
+    cardIdAliases: loadCardAliases(),
     exportedAt: new Date().toISOString()
   };
 
@@ -1477,8 +1479,13 @@ document.getElementById("import-deck-data-input").onchange = (e) => {
         refreshDeckDisplay();
       }
 
+      // カードの対応づけ（古いバックアップには入っていない）
+      const aliasCount = mergeCardAliases(data.cardIdAliases);
+
       renderDeckList();
-      alert("インポートしました");
+      alert(aliasCount > 0
+        ? `インポートしました（カードの対応づけ ${aliasCount}件を取り込みました）`
+        : "インポートしました");
     } catch (err) {
       console.error(err);
       alert("インポートに失敗しました。ファイルの形式をご確認ください");
@@ -2921,6 +2928,33 @@ function saveCardAliases(aliases) {
   } catch (e) {
     // 保存できなくても、その場の読み込みには影響しない
   }
+}
+
+// バックアップファイルなど、外から読み込んだ対応づけの形を確認して、使えるものだけを取り出す
+function sanitizeCardAliases(obj) {
+  const clean = {};
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return clean;
+  Object.entries(obj).forEach(([from, to]) => {
+    const idPattern = /^[A-Za-z0-9-]{1,40}$/;
+    if (typeof to === "string" && idPattern.test(from) && idPattern.test(to)) clean[from] = to;
+  });
+  return clean;
+}
+
+// 読み込んだ対応づけを、いまの端末の対応づけに加える（同じIDは、読み込んだ内容を優先）。
+// 加えた（または更新した）件数を返す
+function mergeCardAliases(incoming) {
+  const clean = sanitizeCardAliases(incoming);
+  const current = loadCardAliases();
+  let changed = 0;
+  Object.entries(clean).forEach(([from, to]) => {
+    if (current[from] !== to) {
+      current[from] = to;
+      changed++;
+    }
+  });
+  if (changed > 0) saveCardAliases(current);
+  return changed;
 }
 
 // 公式サイトのカード画像のURL（このサイトのデータにないIDでも、IDから作れる）
