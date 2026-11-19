@@ -1146,3 +1146,53 @@ body {
 .alias-applied button {
   padding: 4px 10px;
 }
+
+/* 拡大表示は、確認画面（共有されたデッキなど）より手前に出す */
+#card-preview-modal {
+  z-index: 1100;
+}
+/* 長押しで拡大する画像は、ブラウザ標準の長押しメニューを出さない */
+.unresolved-img,
+.alias-candidate img {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.alias-candidate {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.alias-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.alias-filters select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+.alias-count {
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: #555;
+}
+.alias-results-list {
+  max-height: 280px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.alias-more {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px;
+  background: #78909c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+}

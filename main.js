@@ -229,6 +229,48 @@ function attachSearchCardEvents(img, card) {
   img.addEventListener("pointerleave", cancelPress);
 }
 
+// 画像の長押しで拡大表示（card.image があるオブジェクトなら何でも可）。
+// onTap を渡すと、長押しにならなかった短いタップのときだけ呼ぶ
+function attachPreviewLongPress(el, card, onTap) {
+  let timer = null;
+  let longPressed = false;
+  let moved = false;
+  let startX = 0;
+  let startY = 0;
+
+  el.addEventListener("pointerdown", (e) => {
+    longPressed = false;
+    moved = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    clearTimeout(timer);
+    el._longPressed = false;
+    timer = setTimeout(() => {
+      longPressed = true;
+      el._longPressed = true; // 長押しのあとに続くクリックを、呼び出し側で無視するための目印
+      showCardPreview(card);
+    }, LONG_PRESS_MS);
+  });
+  el.addEventListener("pointermove", (e) => {
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (Math.sqrt(dx * dx + dy * dy) > MOVE_THRESHOLD) {
+      moved = true;
+      clearTimeout(timer);
+    }
+  });
+  el.addEventListener("pointerup", () => {
+    clearTimeout(timer);
+    if (!longPressed && !moved && onTap) onTap();
+  });
+  const cancel = () => {
+    clearTimeout(timer);
+    moved = true;
+  };
+  el.addEventListener("pointercancel", cancel);
+  el.addEventListener("pointerleave", cancel);
+}
+
 function showCardPreview(card) {
   document.getElementById("card-preview-img").src = card.image;
   openModal("card-preview-modal");
@@ -2862,6 +2904,7 @@ function buildDeckFromTokens(lrigTokens, mainTokens, name) {
 // 公式のデッキレシピに含まれるIDが、このサイトのカードデータ(card_info.js)にないとき
 // （主にプロモカード）、「同名のカード」を自分で選んで対応づけておくと、次回から自動で読み込まれる。
 const CARD_ALIAS_KEY = "cardIdAliases";
+const ALIAS_PAGE_SIZE = 30; // 候補を一度に表示する件数
 
 function loadCardAliases() {
   try {
@@ -2885,19 +2928,42 @@ function officialCardImageUrl(id) {
   return `https://www.takaratomy.co.jp/products/wixoss/img/card/${String(id).split("-")[0]}/${id}.jpg`;
 }
 
-// カード名やIDの一部（スペース区切りでAND）から、対応づけの候補を探す
-function searchCardsForAlias(query, limit = 8) {
+// カード名やIDの一部（スペース区切りでAND）から、対応づけの候補を探す。
+//   ・同名のカード（再録など）は1件にまとめる（通常版を優先）
+//   ・名前が完全一致 → 名前の先頭が一致 → 名前に含む → IDだけ一致、の順に並べる
+//   ・filters.type / filters.color で、タイプ・色を絞り込める
+function searchCardsForAlias(query, filters = {}) {
   const terms = parseSearchTerms(query);
   if (terms.length === 0) return [];
-  const results = [];
+  const joined = terms.join(" ");
+
+  const byName = new Map();
   for (const c of allCards) {
-    const hay = normalizeSearchText(`${c.name}\n${c.id}`);
-    if (terms.every(t => hay.includes(t))) {
-      results.push(c);
-      if (results.length >= limit) break;
+    if (filters.type && !String(c.type || "").includes(filters.type)) continue;
+    if (filters.color && !String(c.color || "").includes(filters.color)) continue;
+
+    const name = normalizeSearchText(c.name);
+    const hay = `${name}\n${normalizeSearchText(c.id)}`;
+    if (!terms.every(t => hay.includes(t))) continue;
+
+    const nameHasAll = terms.every(t => name.includes(t));
+    let score = 3;
+    if (name === joined) score = 0;
+    else if (nameHasAll && name.startsWith(terms[0])) score = 1;
+    else if (nameHasAll) score = 2;
+
+    const isPromo = /^(PR|SP)/.test(c.id);
+    const prev = byName.get(c.name);
+    if (!prev) {
+      byName.set(c.name, { card: c, score, isPromo, order: byName.size });
+    } else if (prev.isPromo && !isPromo) {
+      byName.set(c.name, { card: c, score, isPromo, order: prev.order });
     }
   }
-  return results;
+
+  return [...byName.values()]
+    .sort((a, b) => a.score - b.score || a.order - b.order)
+    .map(x => x.card);
 }
 
 // 公式サイトのデッキレシピURL（…/deck_recipe.php?deckname=…&lrigdeck=ID,ID,…&maindeck=ID,ID,…）を読み取る。
@@ -3070,6 +3136,8 @@ function renderSharedUnresolved(deck) {
     img.alt = id;
     img.draggable = false;
     img.onerror = () => { img.style.visibility = "hidden"; };
+    // 長押しで、公式の画像を拡大して確認できる
+    attachPreviewLongPress(img, { name: id, image: officialCardImageUrl(id) });
     body.appendChild(img);
 
     const side = document.createElement("div");
@@ -3078,17 +3146,42 @@ function renderSharedUnresolved(deck) {
     const input = document.createElement("input");
     input.type = "text";
     input.placeholder = "同名のカードを検索（カード名の一部）";
+
+    // 短い名前などで候補が多いときに、絞り込めるようにする
+    const filterRow = document.createElement("div");
+    filterRow.className = "alias-filters";
+    const typeSelect = document.createElement("select");
+    [["", "タイプ: 指定なし"], ["ルリグ", "ルリグ"], ["アシストルリグ", "アシストルリグ"], ["シグニ", "シグニ"],
+     ["スペル", "スペル"], ["アーツ", "アーツ"], ["ピース", "ピース"]].forEach(([v, t]) => typeSelect.appendChild(new Option(t, v)));
+    const colorSelect = document.createElement("select");
+    [["", "色: 指定なし"], ["白", "白"], ["青", "青"], ["赤", "赤"], ["黒", "黒"], ["緑", "緑"], ["無", "無"]]
+      .forEach(([v, t]) => colorSelect.appendChild(new Option(t, v)));
+    filterRow.append(typeSelect, colorSelect);
+
     const results = document.createElement("div");
     results.className = "alias-results";
 
-    input.oninput = () => {
+    let shown = ALIAS_PAGE_SIZE;
+    const update = () => {
       results.innerHTML = "";
-      const found = searchCardsForAlias(input.value);
-      if (input.value.trim() !== "" && found.length === 0) {
+      const query = input.value.trim();
+      if (query === "") return;
+
+      const found = searchCardsForAlias(query, { type: typeSelect.value, color: colorSelect.value });
+      if (found.length === 0) {
         results.textContent = "該当するカードがありません";
         return;
       }
-      found.forEach(card => {
+
+      const count = document.createElement("div");
+      count.className = "alias-count";
+      count.textContent = `「${query}」に一致：${found.length}件` +
+        (found.length > ALIAS_PAGE_SIZE ? "（候補が多いときは、タイプ・色で絞り込むか、名前をもう少し入力してください）" : "");
+      results.appendChild(count);
+
+      const list = document.createElement("div");
+      list.className = "alias-results-list";
+      found.slice(0, shown).forEach(card => {
         const item = document.createElement("div");
         item.className = "alias-candidate";
 
@@ -3101,16 +3194,46 @@ function renderSharedUnresolved(deck) {
         const label = document.createElement("div");
         label.appendChild(document.createTextNode(card.name));
         const sub = document.createElement("small");
-        sub.textContent = card.id;
+        sub.textContent = `${card.id}　${card.type || ""}${card.color ? "／" + card.color : ""}`;
         label.appendChild(sub);
 
         item.append(thumb, label);
-        item.onclick = () => resolveMissingCard(id, card);
-        results.appendChild(item);
+        // タップ（クリック）で選ぶ／長押しでカードを拡大して確認
+        attachPreviewLongPress(item, card);
+        item.onclick = () => {
+          if (item._longPressed) {
+            item._longPressed = false; // 長押しのあとのクリックは選択にしない
+            return;
+          }
+          resolveMissingCard(id, card);
+        };
+        list.appendChild(item);
       });
+      results.appendChild(list);
+
+      if (found.length > shown) {
+        const more = document.createElement("button");
+        more.type = "button";
+        more.className = "alias-more";
+        more.textContent = `さらに表示（残り${found.length - shown}件）`;
+        more.onclick = () => {
+          shown += ALIAS_PAGE_SIZE;
+          update();
+        };
+        results.appendChild(more);
+      }
     };
 
-    side.append(input, results);
+    // 入力や絞り込みを変えたら、表示件数は最初に戻す
+    const reset = () => {
+      shown = ALIAS_PAGE_SIZE;
+      update();
+    };
+    input.oninput = reset;
+    typeSelect.onchange = reset;
+    colorSelect.onchange = reset;
+
+    side.append(input, filterRow, results);
     body.appendChild(side);
     row.appendChild(body);
     box.appendChild(row);
@@ -3208,6 +3331,7 @@ function renderSharedDeckPreview(deck) {
       img.title = card.name;
       img.loading = "lazy";
       img.draggable = false;
+      attachPreviewLongPress(img, card); // 長押しで拡大表示
       wrap.appendChild(img);
 
       if (n > 1) {
